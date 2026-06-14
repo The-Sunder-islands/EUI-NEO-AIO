@@ -282,14 +282,20 @@ inline PointerEvent readPointerEvent(window::Handle window, float dpiScale = 1.0
     PointerEvent event;
     event.x = x;
     event.y = y;
-    event.deltaX = x - state.lastX;
-    event.deltaY = y - state.lastY;
     event.down = core::window::isMouseButtonDown(window, 0);
     event.rightDown = core::window::isMouseButtonDown(window, 1);
     event.pressedThisFrame = event.down && !state.lastDown;
     event.releasedThisFrame = !event.down && state.lastDown;
     event.rightPressedThisFrame = event.rightDown && !state.lastRightDown;
     event.rightReleasedThisFrame = !event.rightDown && state.lastRightDown;
+
+    if (event.pressedThisFrame) {
+        event.deltaX = 0.0;
+        event.deltaY = 0.0;
+    } else {
+        event.deltaX = x - state.lastX;
+        event.deltaY = y - state.lastY;
+    }
 
     state.lastX = x;
     state.lastY = y;

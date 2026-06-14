@@ -69,6 +69,7 @@ public:
             .zIndex(zIndex_)
             .clip()
             .scrollState(id_, currentOffset, maxOffset, scrollStep)
+            .scrollDragFrom(id_, 0.0f)
             .onScrollOffsetChanged(onChange)
             .content([&] {
                 ui_.column(id_ + ".content")

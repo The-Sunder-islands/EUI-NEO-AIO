@@ -1,3 +1,7 @@
+#ifndef EUI_SHADER_PRELUDE
+#define EUI_SHADER_PRELUDE "#version 330 core\n"
+#endif
+
 #include "core/render/opengl/opengl_backend.h"
 
 #include "core/window/window_backend.h"
@@ -64,7 +68,7 @@ bool ensureTextRenderResources(TextRenderResources& resources) {
     }
 
     const char* vertexSource =
-        "#version 330 core\n"
+        EUI_SHADER_PRELUDE
         "layout(location = 0) in vec2 aPos;\n"
         "layout(location = 1) in vec2 aUv;\n"
         "layout(location = 2) in float aColored;\n"
@@ -80,7 +84,7 @@ bool ensureTextRenderResources(TextRenderResources& resources) {
         "}\n";
 
     const char* fragmentSource =
-        "#version 330 core\n"
+        EUI_SHADER_PRELUDE
         "in vec2 vUv;\n"
         "in float vColored;\n"
         "out vec4 FragColor;\n"

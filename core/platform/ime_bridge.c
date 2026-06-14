@@ -176,7 +176,7 @@ int eui_ime_is_composing(GLFWwindow* window) {
     return markedRange.location != NSNotFound && markedRange.length > 0 ? 1 : 0;
 }
 
-#else
+#elif !defined(__ANDROID__)
 
 void eui_ime_set_cursor_rect(GLFWwindow* window, double x, double y, double width, double height) {
     (void)window;

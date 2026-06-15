@@ -84,7 +84,6 @@ static bool runWindowSession() {
         return !eui_android_exit_requested();
     }
 
-    app::resetRuntime();
     app::initialize(window);
     core::installInputCallbacks(window);
 

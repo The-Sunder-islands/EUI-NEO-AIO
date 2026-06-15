@@ -2,6 +2,10 @@
 #define EUI_SHADER_PRELUDE "#version 330 core\n"
 #endif
 
+#ifdef __ANDROID__
+#include <android/log.h>
+#endif
+
 #include "core/render/opengl/opengl_backend.h"
 
 #include "core/window/window_backend.h"
@@ -106,6 +110,9 @@ bool ensureTextRenderResources(TextRenderResources& resources) {
     GLuint vertexShader = compileShader(GL_VERTEX_SHADER, vertexSource);
     GLuint fragmentShader = compileShader(GL_FRAGMENT_SHADER, fragmentSource);
     if (vertexShader == 0 || fragmentShader == 0) {
+#ifdef __ANDROID__
+        __android_log_print(ANDROID_LOG_ERROR, "EUI_TEXT", "text shader compile failed vs=%d fs=%d", vertexShader, fragmentShader);
+#endif
         if (vertexShader != 0) {
             glDeleteShader(vertexShader);
         }
@@ -186,6 +193,12 @@ bool ensureAtlasTexture(TextAtlasTexture& texture, const TextAtlasPageData& page
     }
     glBindTexture(GL_TEXTURE_2D, 0);
     texture.generation = page.generation;
+    const GLenum gle = glGetError();
+    if (gle != GL_NO_ERROR) {
+#ifdef __ANDROID__
+        __android_log_print(ANDROID_LOG_ERROR, "EUI_TEXT", "ensureAtlasTexture err=0x%x", gle);
+#endif
+    }
     return texture.texture != 0;
 }
 

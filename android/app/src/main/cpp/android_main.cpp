@@ -84,6 +84,9 @@ static bool runWindowSession() {
         return !eui_android_exit_requested();
     }
 
+    // Reset runtime state for the new GL context (only needed after surface
+    // recreation; the first session's runtime is already fresh).
+    app::resetRuntime();
     app::initialize(window);
     core::installInputCallbacks(window);
 
@@ -192,9 +195,6 @@ extern "C" int eui_android_main(void) {
             __android_log_print(ANDROID_LOG_WARN, "EUI", "eui_android_main: no pending window, retry");
             continue;
         }
-        // Reset runtime state for new GL context — the old element tree and
-        // cached primitives belong to the previous (now destroyed) context.
-        app::resetRuntime();
         __android_log_print(ANDROID_LOG_INFO, "EUI", "eui_android_main: surface promoted, restarting session");
     }
 

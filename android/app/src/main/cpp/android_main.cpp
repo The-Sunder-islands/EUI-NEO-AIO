@@ -170,6 +170,7 @@ static bool runWindowSession() {
     // shared-resource maps (keyed by GLFWwindow*) won't keep leaked GLuints.
     app::releaseGraphicsResources();
     core::releaseInputQueue(window);
+    core::window::invalidateContextKey();
     eui_android_release_egl(window);
 
     return !eui_android_exit_requested();

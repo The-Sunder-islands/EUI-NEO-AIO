@@ -297,7 +297,15 @@ NativeWindowInfo nativeWindowInfo(Handle window) {
 }
 
 ContextKey currentContextKey() {
-    return glfwGetCurrentContext();
+    static int contextGeneration = 0;
+    return reinterpret_cast<ContextKey>(
+        reinterpret_cast<uintptr_t>(glfwGetCurrentContext()) ^
+        (static_cast<uintptr_t>(contextGeneration) << 48));
+}
+
+void invalidateContextKey() {
+    static int contextGeneration = 0;
+    ++contextGeneration;
 }
 
 double timeSeconds() {

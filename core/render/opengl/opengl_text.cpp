@@ -193,6 +193,9 @@ bool ensureAtlasTexture(TextAtlasTexture& texture, const TextAtlasPageData& page
     }
     glBindTexture(GL_TEXTURE_2D, 0);
     texture.generation = page.generation;
+#ifdef __ANDROID__
+    __android_log_print(ANDROID_LOG_INFO, "EUI_TEXT", "atlas upload ch=%d tex=%u gen=%llu", page.channels, texture.texture, (unsigned long long)texture.generation);
+#endif
     const GLenum gle = glGetError();
     if (gle != GL_NO_ERROR) {
 #ifdef __ANDROID__

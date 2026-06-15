@@ -11,6 +11,7 @@ void destroyWindow(Handle window);
 NativeWindowInfo nativeWindowInfo(Handle window);
 
 ContextKey currentContextKey();
+void invalidateContextKey();
 double timeSeconds();
 void postEmptyEvent();
 

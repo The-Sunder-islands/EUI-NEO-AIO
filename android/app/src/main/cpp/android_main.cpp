@@ -84,6 +84,7 @@ static bool runWindowSession() {
     }
 
     app::initialize(window);
+    core::installInputCallbacks(window);
 
     auto renderBackend = core::render::createRenderBackend(window);
     if (!renderBackend) {

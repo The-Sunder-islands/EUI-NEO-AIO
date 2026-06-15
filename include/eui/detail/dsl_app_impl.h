@@ -285,4 +285,12 @@ void shutdown() {
     eui::network::shutdown();
 }
 
+// Full reset between Android surface recreation cycles. Destroys the runtime's
+// element tree and resets app state so the next session starts fresh (new GL
+// context = new resource handles, font atlases, etc.).
+void resetRuntime() {
+    detail::dslRuntime().shutdown();
+    detail::dslAppState() = {};
+}
+
 } // namespace app

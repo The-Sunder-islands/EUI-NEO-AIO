@@ -38,6 +38,7 @@ bool isAnimating();
 void render(int windowWidth, int windowHeight, float dpiScale);
 void releaseGraphicsResources();
 void shutdown();
+void resetRuntime();
 std::vector<DslWindowRequest> consumeWindowRequests();
 
 } // namespace app

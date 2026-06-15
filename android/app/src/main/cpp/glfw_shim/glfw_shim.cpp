@@ -1,5 +1,7 @@
 #include <GLFW/glfw3.h>
 
+#include <vulkan/vulkan.h>
+
 #include <android/native_window.h>
 #include <android/native_window_jni.h>
 #include <android/asset_manager.h>
@@ -552,11 +554,13 @@ void glfwWaitEventsTimeout(double timeout) {
     }
 }
 
-const char* glfwGetError(int*) { return nullptr; }
+int glfwGetError(const char**) { return 0; }
 
 // ================================================================
 // Vulkan integration
 // ================================================================
+
+extern "C" {
 
 void glfwInitVulkanLoader(PFN_vkGetInstanceProcAddr loader) {
     g_vkGetInstanceProcAddr = loader;
@@ -577,7 +581,7 @@ VkResult glfwCreateWindowSurface(VkInstance instance, GLFWwindow* window,
     if (!g_vkGetInstanceProcAddr || !window || !window->nativeWindow) {
         __android_log_print(ANDROID_LOG_ERROR, "EUI",
             "glfwCreateWindowSurface: missing vk loader or native window");
-        return -1; // VK_ERROR_EXTENSION_NOT_PRESENT
+        return VK_ERROR_EXTENSION_NOT_PRESENT;
     }
 
     typedef VkResult (*CreateSurfaceFn)(
@@ -591,7 +595,7 @@ VkResult glfwCreateWindowSurface(VkInstance instance, GLFWwindow* window,
     if (!fn) {
         __android_log_print(ANDROID_LOG_ERROR, "EUI",
             "glfwCreateWindowSurface: vkCreateAndroidSurfaceKHR not found");
-        return -1;
+        return VK_ERROR_EXTENSION_NOT_PRESENT;
     }
 
     // Define the struct layout locally; ABI matches VkAndroidSurfaceCreateInfoKHR.
@@ -607,6 +611,8 @@ VkResult glfwCreateWindowSurface(VkInstance instance, GLFWwindow* window,
 
     return fn(instance, &info, allocator, surface);
 }
+
+} // extern "C"
 
 // ================================================================
 // Surface lifecycle helpers used by the native main loop

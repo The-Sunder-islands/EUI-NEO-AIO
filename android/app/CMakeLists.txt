@@ -158,17 +158,19 @@ endif()
 # Link system libraries
 find_library(log-lib log)
 find_library(android-lib android)
+find_library(egl-lib EGL)
+find_library(glesv3-lib GLESv3)
 
 if(EUI_RENDER_BACKEND STREQUAL "vulkan")
     find_library(vulkan-lib vulkan)
     target_link_libraries(eui-neo
         ${log-lib}
         ${android-lib}
+        ${egl-lib}
+        ${glesv3-lib}
         ${vulkan-lib}
     )
 else()
-    find_library(egl-lib EGL)
-    find_library(glesv3-lib GLESv3)
     target_link_libraries(eui-neo
         ${log-lib}
         ${android-lib}

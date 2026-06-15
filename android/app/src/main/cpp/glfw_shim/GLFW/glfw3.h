@@ -8,15 +8,12 @@
 extern "C" {
 #endif
 
-/* Vulkan forward declarations (minimal, no vulkan.h dependency) */
-typedef struct VkInstance_T*          VkInstance;
-typedef struct VkSurfaceKHR_T*        VkSurfaceKHR;
-typedef int                           VkResult;
-struct VkAllocationCallbacks;
-typedef void* (*PFN_vkGetInstanceProcAddr)(VkInstance, const char*);
 #define GLFWAPI
 
-#define VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR 1000008000
+/* Vulkan declarations — match real GLFW: only expose when vulkan.h is included */
+#if defined(VK_VERSION_1_0)
+#include <vulkan/vulkan.h>
+#endif
 
 typedef struct GLFWwindow  GLFWwindow;
 typedef struct GLFWmonitor GLFWmonitor;
@@ -188,14 +185,15 @@ double glfwGetTime(void);
 void glfwPollEvents(void);
 void glfwWaitEvents(void);
 void glfwWaitEventsTimeout(double timeout);
-const char* glfwGetError(int* description);
+int glfwGetError(const char** description);
 
-/* Vulkan integration */
+#if defined(VK_VERSION_1_0)
 void        glfwInitVulkanLoader(PFN_vkGetInstanceProcAddr loader);
 const char** glfwGetRequiredInstanceExtensions(uint32_t* count);
 VkResult    glfwCreateWindowSurface(VkInstance instance, GLFWwindow* window,
                                      const VkAllocationCallbacks* allocator,
                                      VkSurfaceKHR* surface);
+#endif /*VK_VERSION_1_0*/
 
 #ifdef __cplusplus
 }

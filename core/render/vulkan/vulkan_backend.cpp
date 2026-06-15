@@ -445,10 +445,12 @@ bool VulkanRenderBackend::createInstance() {
 
     VkInstanceCreateFlags flags = 0;
     const std::vector<VkExtensionProperties> availableExtensions = instanceExtensions();
+#ifdef VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME
     if (hasExtension(availableExtensions, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME)) {
         addUniqueExtension(extensions, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
         flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
     }
+#endif
     if (hasExtension(availableExtensions, VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME)) {
         addUniqueExtension(extensions, VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
     }

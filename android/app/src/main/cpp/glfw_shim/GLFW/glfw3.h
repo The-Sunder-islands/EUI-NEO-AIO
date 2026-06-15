@@ -49,6 +49,8 @@ typedef struct GLFWimage {
 #define GLFW_KEY_C          67
 #define GLFW_KEY_V          86
 #define GLFW_KEY_X          88
+#define GLFW_KEY_Z          90
+#define GLFW_KEY_Y          89
 #define GLFW_KEY_BACKSLASH  92
 #define GLFW_MOD_SHIFT      0x0001
 #define GLFW_MOD_CONTROL    0x0002
@@ -73,6 +75,21 @@ typedef struct GLFWimage {
 #define GLFW_FLOATING        0x00020007
 #define GLFW_MAXIMIZED       0x00020008
 #define GLFW_TRANSPARENT_FRAMEBUFFER 0x0002000A
+#define GLFW_RED_BITS        0x00021001
+#define GLFW_GREEN_BITS      0x00021002
+#define GLFW_BLUE_BITS       0x00021003
+#define GLFW_ALPHA_BITS      0x00021004
+#define GLFW_DEPTH_BITS      0x00021005
+#define GLFW_STENCIL_BITS    0x00021006
+#define GLFW_SAMPLES         0x0002100D
+#define GLFW_REFRESH_RATE    0x0002100F
+#define GLFW_CLIENT_API      0x00022001
+#define GLFW_CONTEXT_VERSION_MAJOR  0x00022002
+#define GLFW_CONTEXT_VERSION_MINOR  0x00022003
+#define GLFW_OPENGL_PROFILE  0x00022008
+#define GLFW_OPENGL_API      0x00030001
+#define GLFW_OPENGL_CORE_PROFILE    0x00032001
+#define GLFW_NO_API          0
 
 int  glfwInit(void);
 void glfwTerminate(void);

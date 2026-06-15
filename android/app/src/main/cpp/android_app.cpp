@@ -880,7 +880,7 @@ const DslAppConfig& dslAppConfig() {
         .fps(60.0)
         .textFont(eui_android_text_font_path() ? eui_android_text_font_path() : "")
         .iconFont(eui_android_icon_font_path() ? eui_android_icon_font_path() : "")
-        .showFrameCountInTitle(false);
+        .showDebugStatsInTitle(false);
     return config;
 }
 

@@ -18,6 +18,10 @@ include_directories(
     ${EUI_ROOT}
     ${EUI_ROOT}/include
     ${EUI_ROOT}/3rd
+    ${EUI_ROOT}/3rd/freetype/include
+    ${EUI_ROOT}/3rd/harfbuzz/src
+    ${EUI_ROOT}/3rd/libpng-1.6.43
+    ${EUI_ROOT}/3rd/zlib-1.3.1
 )
 
 # Source files
@@ -51,6 +55,57 @@ set(EUI_CORE_SOURCES
     ${EUI_ROOT}/core/window/window_backend.cpp
 )
 
+# Minimal FreeType sources for Android build
+set(FREETYPE_SOURCES
+    ${EUI_ROOT}/3rd/freetype/src/base/ftbase.c
+    ${EUI_ROOT}/3rd/freetype/src/base/ftinit.c
+    ${EUI_ROOT}/3rd/freetype/src/base/ftsystem.c
+    ${EUI_ROOT}/3rd/freetype/src/base/ftdebug.c
+    ${EUI_ROOT}/3rd/freetype/src/base/ftbitmap.c
+    ${EUI_ROOT}/3rd/freetype/src/base/ftglyph.c
+    ${EUI_ROOT}/3rd/freetype/src/base/ftmm.c
+    ${EUI_ROOT}/3rd/freetype/src/smooth/smooth.c
+    ${EUI_ROOT}/3rd/freetype/src/psnames/psnames.c
+    ${EUI_ROOT}/3rd/freetype/src/sfnt/sfnt.c
+    ${EUI_ROOT}/3rd/freetype/src/truetype/truetype.c
+    ${EUI_ROOT}/3rd/freetype/src/autofit/autofit.c
+    ${EUI_ROOT}/3rd/freetype/src/raster/raster.c
+    ${EUI_ROOT}/3rd/freetype/src/cff/cff.c
+    ${EUI_ROOT}/3rd/freetype/src/pshinter/pshinter.c
+    ${EUI_ROOT}/3rd/freetype/src/psaux/psaux.c
+    ${EUI_ROOT}/3rd/freetype/src/sdf/sdf.c
+    ${EUI_ROOT}/3rd/freetype/src/svg/svg.c
+    ${EUI_ROOT}/3rd/freetype/src/type1/type1.c
+    ${EUI_ROOT}/3rd/freetype/src/cid/type1cid.c
+    ${EUI_ROOT}/3rd/freetype/src/pfr/pfr.c
+    ${EUI_ROOT}/3rd/freetype/src/type42/type42.c
+    ${EUI_ROOT}/3rd/freetype/src/winfonts/winfnt.c
+    ${EUI_ROOT}/3rd/freetype/src/pcf/pcf.c
+    ${EUI_ROOT}/3rd/freetype/src/bdf/bdf.c
+    ${EUI_ROOT}/3rd/freetype/src/gzip/ftgzip.c
+    ${EUI_ROOT}/3rd/freetype/src/lzw/ftlzw.c
+)
+list(APPEND EUI_CORE_SOURCES ${FREETYPE_SOURCES})
+
+# Minimal zlib sources (for freetype gzip support)
+set(ZLIB_SOURCES
+    ${EUI_ROOT}/3rd/zlib-1.3.1/adler32.c
+    ${EUI_ROOT}/3rd/zlib-1.3.1/crc32.c
+    ${EUI_ROOT}/3rd/zlib-1.3.1/inffast.c
+    ${EUI_ROOT}/3rd/zlib-1.3.1/inflate.c
+    ${EUI_ROOT}/3rd/zlib-1.3.1/inftrees.c
+    ${EUI_ROOT}/3rd/zlib-1.3.1/zutil.c
+    ${EUI_ROOT}/3rd/zlib-1.3.1/compress.c
+    ${EUI_ROOT}/3rd/zlib-1.3.1/uncompr.c
+    ${EUI_ROOT}/3rd/zlib-1.3.1/deflate.c
+    ${EUI_ROOT}/3rd/zlib-1.3.1/trees.c
+    ${EUI_ROOT}/3rd/zlib-1.3.1/gzclose.c
+    ${EUI_ROOT}/3rd/zlib-1.3.1/gzlib.c
+    ${EUI_ROOT}/3rd/zlib-1.3.1/gzread.c
+    ${EUI_ROOT}/3rd/zlib-1.3.1/gzwrite.c
+)
+list(APPEND EUI_CORE_SOURCES ${ZLIB_SOURCES})
+
 # Build shared library
 add_library(eui-neo SHARED
     ${SHIM_SOURCES}
@@ -63,6 +118,8 @@ target_compile_definitions(eui-neo PRIVATE
     __ANDROID__
     GLFW_INCLUDE_NONE
     EUI_RENDER_BACKEND_OPENGL=1
+    FT2_BUILD_LIBRARY=1
+    FT_CONFIG_OPTION_SYSTEM_ZLIB=0
 )
 
 # Force-include GLSL compatibility header

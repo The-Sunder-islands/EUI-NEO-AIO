@@ -637,6 +637,11 @@ extern "C" void eui_ime_set_cursor_rect(GLFWwindow* window, double x, double y, 
     }
 }
 
+extern "C" int eui_ime_is_composing(GLFWwindow* window) {
+    (void)window;
+    return 0;
+}
+
 // Called once per frame by the native main loop. Hides IME if focus has
 // moved away (no set_cursor_rect ping this frame) while keyboard is visible.
 extern "C" void eui_android_poll_ime_frame(void) {

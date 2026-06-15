@@ -92,6 +92,11 @@ static bool runWindowSession() {
         eui_android_release_egl(window);
         return !eui_android_exit_requested();
     }
+    if (!renderBackend->initialize()) {
+        __android_log_print(ANDROID_LOG_ERROR, "EUI", "renderBackend->initialize() failed");
+        eui_android_release_egl(window);
+        return !eui_android_exit_requested();
+    }
 
     WindowState ws;
     double lastFrameTime = glfwGetTime();

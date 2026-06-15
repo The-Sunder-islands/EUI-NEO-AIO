@@ -220,11 +220,6 @@ inline void Runtime::updateImeCursorRect(core::window::Handle window, float dpiS
         element->imeRect.height
     };
     const Rect pixelRect = toPixelRect(logicalRect, dpiScale);
-    if (imeCursorRectValid_ &&
-        imeCursorWindow_ == window &&
-        closeEnough(imeCursorRect_, pixelRect)) {
-        return;
-    }
     imeCursorWindow_ = window;
     imeCursorRect_ = pixelRect;
     imeCursorRectValid_ = true;

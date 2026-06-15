@@ -73,6 +73,7 @@ static void updateFrameInterval(GLFWwindow* w, WindowState& ws, double now, bool
 // then tear everything down. Returns true to continue the outer loop, false
 // if we should exit entirely.
 static bool runWindowSession() {
+    __android_log_print(ANDROID_LOG_INFO, "EUI", "runWindowSession: starting");
     GLFWwindow* window = glfwCreateWindow(1080, 1920, "EUI-NEO", nullptr, nullptr);
     if (!window) {
         __android_log_print(ANDROID_LOG_ERROR, "EUI", "glfwCreateWindow failed");
@@ -136,6 +137,7 @@ static bool runWindowSession() {
         eui_android_poll_ime_frame();
 
         if (ws.needsRender) {
+            __android_log_print(ANDROID_LOG_INFO, "EUI", "render frame %d %d", fbW, fbH);
             renderBackend->beginFrame({
                 window,
                 core::window::nativeWindowInfo(window),
@@ -161,6 +163,7 @@ static bool runWindowSession() {
         }
     }
 
+    __android_log_print(ANDROID_LOG_INFO, "EUI", "runWindowSession: surface lost, exiting inner loop");
     // Surface lost or app exiting — full teardown of this window. While the
     // EGL context is still current, drop the runtime's GL handles so the
     // shared-resource maps (keyed by GLFWwindow*) won't keep leaked GLuints.
@@ -172,18 +175,24 @@ static bool runWindowSession() {
 }
 
 extern "C" int eui_android_main(void) {
+    __android_log_print(ANDROID_LOG_INFO, "EUI", "eui_android_main: started");
     // bridge.nativeWindow was already set by the nativeMain JNI for the first
     // session. Subsequent sessions get their surface from promote_pending_window
     // after wait_for_surface returns.
     while (!eui_android_exit_requested()) {
-        if (!runWindowSession()) break;
+        if (!runWindowSession()) {
+            __android_log_print(ANDROID_LOG_INFO, "EUI", "eui_android_main: session ended, check exit");
+            break;
+        }
 
+        __android_log_print(ANDROID_LOG_INFO, "EUI", "eui_android_main: waiting for surface");
         if (!eui_android_wait_for_surface()) break;
+        __android_log_print(ANDROID_LOG_INFO, "EUI", "eui_android_main: surface ready, promoting");
         if (!eui_android_promote_pending_window()) {
-            // wait_for_surface returned true without exit, so there should be
-            // a pending window. If not, loop and retry.
+            __android_log_print(ANDROID_LOG_WARN, "EUI", "eui_android_main: no pending window, retry");
             continue;
         }
+        __android_log_print(ANDROID_LOG_INFO, "EUI", "eui_android_main: surface promoted, restarting session");
     }
 
     app::shutdown();

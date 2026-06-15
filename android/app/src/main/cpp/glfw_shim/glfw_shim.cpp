@@ -171,9 +171,13 @@ GLFWwindow* glfwCreateWindow(int width, int height, const char*,
         nw = bridge.nativeWindow;
     }
     if (!nw) {
-        __android_log_print(ANDROID_LOG_ERROR, "EUI", "createWindow: nativeWindow is null");
+        __android_log_print(ANDROID_LOG_ERROR, "EUI",
+            "createWindow: nativeWindow is null (pending=%d, surfaceReady=%d)",
+            bridge.pendingWindow != nullptr ? 1 : 0,
+            bridge.surfaceReady.load());
         return nullptr;
     }
+    __android_log_print(ANDROID_LOG_INFO, "EUI", "createWindow: nativeWindow=%p", (void*)nw);
 
     GLFWwindow* w = new GLFWwindow();
     w->nativeWindow = nw;
@@ -242,7 +246,9 @@ GLFWwindow* glfwCreateWindow(int width, int height, const char*,
         eglDestroySurface(dpy, sfc); eglDestroyContext(dpy, ctx);
         eglTerminate(dpy); delete w; return nullptr;
     }
-    __android_log_print(ANDROID_LOG_INFO, "EUI", "EGL context ready, GL_VERSION=%s",
+    __android_log_print(ANDROID_LOG_INFO, "EUI", "createWindow: EGL ok, w=%p display=%p ctx=%p sfc=%p",
+                        (void*)w, (void*)dpy, (void*)ctx, (void*)sfc);
+    __android_log_print(ANDROID_LOG_INFO, "EUI", "createWindow: GL_VERSION=%s",
                         (const char*)glGetString(GL_VERSION));
 
     g_currentWindow = w;

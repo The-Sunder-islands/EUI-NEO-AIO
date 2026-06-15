@@ -74,6 +74,7 @@ static void updateFrameInterval(GLFWwindow* w, WindowState& ws, double now, bool
 // if we should exit entirely.
 static bool runWindowSession() {
     __android_log_print(ANDROID_LOG_INFO, "EUI", "runWindowSession: starting");
+    core::render::initializeRenderBackendLoader();
 #if defined(EUI_RENDER_BACKEND_VULKAN)
     glfwDefaultWindowHints();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);

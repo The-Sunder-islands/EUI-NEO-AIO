@@ -322,6 +322,7 @@ void VulkanRenderBackend::beginFrame(const RenderSurface& surface) {
     renderingToCache_ = false;
     backdropReady_ = false;
     primitiveVertices_.used = 0;
+    canvasVertices_.used = 0;
     textVertices_.used = 0;
     imageVertices_.used = 0;
 }
@@ -778,6 +779,7 @@ void VulkanRenderBackend::destroySwapchain() {
     frameRecorded_ = false;
     renderPassActive_ = false;
     destroyRoundedRectPipeline();
+    destroyCanvasPipeline();
     destroyBackdropResources();
     destroyTextPipeline();
     destroyTextResources();

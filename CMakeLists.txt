@@ -15,7 +15,7 @@ option(EUI_BUILD_TEST_FIXTURES "Build internal test fixture applications." OFF)
 option(EUI_VULKAN_LOW_LATENCY_PRESENT "Prefer low-latency Vulkan presentation when available." OFF)
 
 set(EUI_DEFAULT_WINDOW_BACKEND "glfw")
-set(EUI_DEFAULT_RENDER_BACKEND "opengl")
+set(EUI_DEFAULT_RENDER_BACKEND "vulkan")
 get_filename_component(EUI_BUILD_DIR_NAME "${CMAKE_BINARY_DIR}" NAME)
 string(TOLOWER "${EUI_BUILD_DIR_NAME}" EUI_BUILD_DIR_NAME_LOWER)
 if(EUI_BUILD_DIR_NAME_LOWER MATCHES "(^|[-_])sdl2($|[-_])")
@@ -116,6 +116,7 @@ set(CORE_SOURCES
     core/render/image_source.cpp
     core/render/primitive.cpp
     core/render/render_backend.cpp
+    core/render/canvas.cpp
     core/render/stb_image_impl.cpp
     core/render/text.cpp
     core/platform/tray_bridge.c

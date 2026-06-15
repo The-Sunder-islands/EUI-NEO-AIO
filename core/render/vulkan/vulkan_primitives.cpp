@@ -1,5 +1,6 @@
 #include "core/render/vulkan/vulkan_backend.h"
 
+#include "core/render/vulkan/vulkan_canvas_shaders.h"
 #include "core/render/vulkan/vulkan_rounded_rect_shaders.h"
 
 #include <algorithm>
@@ -26,6 +27,18 @@ struct RoundedRectPushConstants {
 };
 
 static_assert(sizeof(RoundedRectPushConstants) == 128, "Rounded rect push constants must fit Vulkan 1.0 minimum size.");
+
+struct CanvasPushConstants {
+    float windowSize[4] = {};   // x=windowWidth, y=windowHeight
+    float fillColor[4] = {};    // rgba
+    float strokeColor[4] = {};  // rgba
+    float shapeRect[4] = {};    // x, y, w, h (or cx, cy, r, 0 for circle)
+    float shapeParams[4] = {};  // x=cornerRadius, y=strokeWidth, z=shapeKind
+    float transform[4] = {};    // m00, m01, tx, ty
+    float transform2[4] = {};   // m10, m11, 0, opacity
+};
+
+static_assert(sizeof(CanvasPushConstants) <= 128, "Canvas push constants must fit Vulkan 1.0 minimum size.");
 
 } // namespace
 
@@ -597,6 +610,326 @@ void VulkanRenderBackend::destroyPrimitiveVertexBuffer() {
     }
     primitiveVertices_.capacity = 0;
     primitiveVertices_.used = 0;
+}
+
+// --- canvas rendering ---
+
+void VulkanRenderBackend::drawCanvasShape(const CanvasDrawCommand& command, int windowWidth, int windowHeight) {
+    if (!frameActive_ || windowWidth <= 0 || windowHeight <= 0) {
+        return;
+    }
+    if (!ensureCanvasPipeline() || !ensureCanvasVertexBuffer(6)) {
+        return;
+    }
+    if (!frameRecorded_) {
+        recordClearPass(clearColor_);
+    }
+    if (!renderPassActive_) {
+        return;
+    }
+
+    // Generate a screen-space quad covering the shape's bounding box
+    const std::size_t vertexOffset = canvasVertices_.used;
+    auto* mappedVertices = static_cast<PrimitiveGeometryVertex*>(canvasVertices_.mapped);
+
+    const float x0 = command.rect.x;
+    const float y0 = command.rect.y;
+    const float x1 = command.rect.x + command.rect.width;
+    const float y1 = command.rect.y + command.rect.height;
+
+    // For circles, the rect is {cx, cy, r*2, r*2} but we set width/height as diameter.
+    // Actually CanvasPrimitive::render sets rect = {cx, cy, radius, 0} for circles.
+    // We need a quad that covers the circle.
+    float bx0 = x0, by0 = y0, bx1 = x1, by1 = y1;
+    if (command.kind == CanvasShapeKind::FillCircle || command.kind == CanvasShapeKind::StrokeCircle) {
+        float cx = command.rect.x;
+        float cy = command.rect.y;
+        float r = command.rect.width;
+        bx0 = cx - r;
+        by0 = cy - r;
+        bx1 = cx + r;
+        by1 = cy + r;
+    }
+
+    // Triangle 1
+    mappedVertices[vertexOffset + 0].screen = {bx0, by0, 0.0f};
+    mappedVertices[vertexOffset + 0].local = {bx0, by0};
+    mappedVertices[vertexOffset + 1].screen = {bx1, by0, 0.0f};
+    mappedVertices[vertexOffset + 1].local = {bx1, by0};
+    mappedVertices[vertexOffset + 2].screen = {bx1, by1, 0.0f};
+    mappedVertices[vertexOffset + 2].local = {bx1, by1};
+    // Triangle 2
+    mappedVertices[vertexOffset + 3].screen = {bx0, by0, 0.0f};
+    mappedVertices[vertexOffset + 3].local = {bx0, by0};
+    mappedVertices[vertexOffset + 4].screen = {bx1, by1, 0.0f};
+    mappedVertices[vertexOffset + 4].local = {bx1, by1};
+    mappedVertices[vertexOffset + 5].screen = {bx0, by1, 0.0f};
+    mappedVertices[vertexOffset + 5].local = {bx0, by1};
+
+    canvasVertices_.used += 6;
+
+    VkCommandBuffer commandBuffer = currentCommandBuffer();
+    if (!applyDrawViewportAndScissor(windowWidth, windowHeight)) {
+        return;
+    }
+
+    CanvasPushConstants pc{};
+    pc.windowSize[0] = static_cast<float>(windowWidth);
+    pc.windowSize[1] = static_cast<float>(windowHeight);
+    pc.fillColor[0] = command.fillColor.r;
+    pc.fillColor[1] = command.fillColor.g;
+    pc.fillColor[2] = command.fillColor.b;
+    pc.fillColor[3] = command.fillColor.a;
+    pc.strokeColor[0] = command.strokeColor.r;
+    pc.strokeColor[1] = command.strokeColor.g;
+    pc.strokeColor[2] = command.strokeColor.b;
+    pc.strokeColor[3] = command.strokeColor.a;
+    pc.shapeRect[0] = command.rect.x;
+    pc.shapeRect[1] = command.rect.y;
+    pc.shapeRect[2] = command.rect.width;
+    pc.shapeRect[3] = command.rect.height;
+    pc.shapeParams[0] = command.cornerRadius;
+    pc.shapeParams[1] = command.strokeWidth;
+    pc.shapeParams[2] = static_cast<float>(static_cast<std::uint8_t>(command.kind));
+    pc.transform[0] = command.transform.m00;
+    pc.transform[1] = command.transform.m01;
+    pc.transform[2] = command.transform.tx;
+    pc.transform[3] = command.transform.ty;
+    pc.transform2[0] = command.transform.m10;
+    pc.transform2[1] = command.transform.m11;
+    pc.transform2[2] = 0.0f;
+    pc.transform2[3] = command.opacity;
+
+    const VkDeviceSize bufferOffset = static_cast<VkDeviceSize>(vertexOffset * sizeof(PrimitiveGeometryVertex));
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, canvasPipeline_);
+    vkCmdBindVertexBuffers(commandBuffer, 0, 1, &canvasVertices_.buffer, &bufferOffset);
+    vkCmdPushConstants(commandBuffer,
+                       canvasPipelineLayout_,
+                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                       0,
+                       sizeof(pc),
+                       &pc);
+    vkCmdDraw(commandBuffer, 6, 1, 0, 0);
+}
+
+bool VulkanRenderBackend::ensureCanvasPipeline() {
+    if (canvasPipeline_ != VK_NULL_HANDLE) {
+        return true;
+    }
+    if (device_ == VK_NULL_HANDLE || renderPass_ == VK_NULL_HANDLE) {
+        return false;
+    }
+
+    VkShaderModule vertexShader = createShaderModule(device_,
+                                                     shaders::kCanvasVertexSpirv,
+                                                     shaders::kCanvasVertexSpirvSize);
+    VkShaderModule fragmentShader = createShaderModule(device_,
+                                                       shaders::kCanvasFragmentSpirv,
+                                                       shaders::kCanvasFragmentSpirvSize);
+    if (vertexShader == VK_NULL_HANDLE || fragmentShader == VK_NULL_HANDLE) {
+        if (vertexShader != VK_NULL_HANDLE) {
+            vkDestroyShaderModule(device_, vertexShader, nullptr);
+        }
+        if (fragmentShader != VK_NULL_HANDLE) {
+            vkDestroyShaderModule(device_, fragmentShader, nullptr);
+        }
+        return false;
+    }
+
+    VkPipelineShaderStageCreateInfo shaderStages[2]{};
+    shaderStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    shaderStages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+    shaderStages[0].module = vertexShader;
+    shaderStages[0].pName = "main";
+    shaderStages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    shaderStages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    shaderStages[1].module = fragmentShader;
+    shaderStages[1].pName = "main";
+
+    VkVertexInputBindingDescription binding{};
+    binding.binding = 0;
+    binding.stride = sizeof(PrimitiveGeometryVertex);
+    binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+    std::array<VkVertexInputAttributeDescription, 2> attributes{};
+    attributes[0].binding = 0;
+    attributes[0].location = 0;
+    attributes[0].format = VK_FORMAT_R32G32B32_SFLOAT;
+    attributes[0].offset = offsetof(PrimitiveGeometryVertex, screen);
+    attributes[1].binding = 0;
+    attributes[1].location = 1;
+    attributes[1].format = VK_FORMAT_R32G32_SFLOAT;
+    attributes[1].offset = offsetof(PrimitiveGeometryVertex, local);
+
+    VkPipelineVertexInputStateCreateInfo vertexInput{};
+    vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    vertexInput.vertexBindingDescriptionCount = 1;
+    vertexInput.pVertexBindingDescriptions = &binding;
+    vertexInput.vertexAttributeDescriptionCount = static_cast<std::uint32_t>(attributes.size());
+    vertexInput.pVertexAttributeDescriptions = attributes.data();
+
+    VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+    inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+    VkPipelineViewportStateCreateInfo viewportState{};
+    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    viewportState.viewportCount = 1;
+    viewportState.scissorCount = 1;
+
+    VkPipelineRasterizationStateCreateInfo rasterizer{};
+    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+    rasterizer.cullMode = VK_CULL_MODE_NONE;
+    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    rasterizer.lineWidth = 1.0f;
+
+    VkPipelineMultisampleStateCreateInfo multisampling{};
+    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+    VkPipelineColorBlendAttachmentState colorBlendAttachment{};
+    colorBlendAttachment.blendEnable = VK_TRUE;
+    colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+    colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+    colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+    colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+    colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT |
+                                          VK_COLOR_COMPONENT_G_BIT |
+                                          VK_COLOR_COMPONENT_B_BIT |
+                                          VK_COLOR_COMPONENT_A_BIT;
+
+    VkPipelineColorBlendStateCreateInfo colorBlending{};
+    colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    colorBlending.attachmentCount = 1;
+    colorBlending.pAttachments = &colorBlendAttachment;
+
+    std::array<VkDynamicState, 2> dynamicStates{VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+    VkPipelineDynamicStateCreateInfo dynamicState{};
+    dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    dynamicState.dynamicStateCount = static_cast<std::uint32_t>(dynamicStates.size());
+    dynamicState.pDynamicStates = dynamicStates.data();
+
+    VkPushConstantRange pushConstant{};
+    pushConstant.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    pushConstant.offset = 0;
+    pushConstant.size = sizeof(CanvasPushConstants);
+
+    // No descriptor sets for canvas (no textures)
+    VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipelineLayoutInfo.setLayoutCount = 0;
+    pipelineLayoutInfo.pSetLayouts = nullptr;
+    pipelineLayoutInfo.pushConstantRangeCount = 1;
+    pipelineLayoutInfo.pPushConstantRanges = &pushConstant;
+    if (vkCreatePipelineLayout(device_, &pipelineLayoutInfo, nullptr, &canvasPipelineLayout_) != VK_SUCCESS) {
+        vkDestroyShaderModule(device_, fragmentShader, nullptr);
+        vkDestroyShaderModule(device_, vertexShader, nullptr);
+        return false;
+    }
+
+    VkGraphicsPipelineCreateInfo pipelineInfo{};
+    pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    pipelineInfo.stageCount = 2;
+    pipelineInfo.pStages = shaderStages;
+    pipelineInfo.pVertexInputState = &vertexInput;
+    pipelineInfo.pInputAssemblyState = &inputAssembly;
+    pipelineInfo.pViewportState = &viewportState;
+    pipelineInfo.pRasterizationState = &rasterizer;
+    pipelineInfo.pMultisampleState = &multisampling;
+    pipelineInfo.pColorBlendState = &colorBlending;
+    pipelineInfo.pDynamicState = &dynamicState;
+    pipelineInfo.layout = canvasPipelineLayout_;
+    pipelineInfo.renderPass = renderPass_;
+    pipelineInfo.subpass = 0;
+
+    const bool created = vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &canvasPipeline_) == VK_SUCCESS;
+    vkDestroyShaderModule(device_, fragmentShader, nullptr);
+    vkDestroyShaderModule(device_, vertexShader, nullptr);
+    if (!created) {
+        destroyCanvasPipeline();
+    }
+    return created;
+}
+
+bool VulkanRenderBackend::ensureCanvasVertexBuffer(std::size_t vertexCount) {
+    if (vertexCount == 0) {
+        return false;
+    }
+    if (canvasVertices_.buffer != VK_NULL_HANDLE && canvasVertices_.used + vertexCount <= canvasVertices_.capacity) {
+        return canvasVertices_.mapped != nullptr;
+    }
+
+    // Recreate if too small or doesn't exist
+    if (canvasVertices_.buffer != VK_NULL_HANDLE) {
+        if (canvasVertices_.memory != VK_NULL_HANDLE && canvasVertices_.mapped != nullptr) {
+            vkUnmapMemory(device_, canvasVertices_.memory);
+            canvasVertices_.mapped = nullptr;
+        }
+        if (canvasVertices_.buffer != VK_NULL_HANDLE) {
+            vkDestroyBuffer(device_, canvasVertices_.buffer, nullptr);
+            canvasVertices_.buffer = VK_NULL_HANDLE;
+        }
+        if (canvasVertices_.memory != VK_NULL_HANDLE) {
+            vkFreeMemory(device_, canvasVertices_.memory, nullptr);
+            canvasVertices_.memory = VK_NULL_HANDLE;
+        }
+    }
+
+    const VkDeviceSize size = static_cast<VkDeviceSize>(std::max(vertexCount, std::size_t{256}) * sizeof(PrimitiveGeometryVertex));
+    VkBufferCreateInfo bufferInfo{};
+    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufferInfo.size = size;
+    bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    if (vkCreateBuffer(device_, &bufferInfo, nullptr, &canvasVertices_.buffer) != VK_SUCCESS) {
+        return false;
+    }
+
+    VkMemoryRequirements memoryRequirements{};
+    vkGetBufferMemoryRequirements(device_, canvasVertices_.buffer, &memoryRequirements);
+
+    VkMemoryAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocInfo.allocationSize = memoryRequirements.size;
+    allocInfo.memoryTypeIndex = findMemoryType(memoryRequirements.memoryTypeBits,
+                                               VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    if (allocInfo.memoryTypeIndex == std::numeric_limits<std::uint32_t>::max() ||
+        vkAllocateMemory(device_, &allocInfo, nullptr, &canvasVertices_.memory) != VK_SUCCESS ||
+        vkBindBufferMemory(device_, canvasVertices_.buffer, canvasVertices_.memory, 0) != VK_SUCCESS ||
+        vkMapMemory(device_, canvasVertices_.memory, 0, size, 0, &canvasVertices_.mapped) != VK_SUCCESS) {
+        destroyCanvasPipeline();
+        return false;
+    }
+    canvasVertices_.capacity = static_cast<std::size_t>(size / sizeof(PrimitiveGeometryVertex));
+    return true;
+}
+
+void VulkanRenderBackend::destroyCanvasPipeline() {
+    if (canvasPipeline_ != VK_NULL_HANDLE) {
+        vkDestroyPipeline(device_, canvasPipeline_, nullptr);
+        canvasPipeline_ = VK_NULL_HANDLE;
+    }
+    if (canvasPipelineLayout_ != VK_NULL_HANDLE) {
+        vkDestroyPipelineLayout(device_, canvasPipelineLayout_, nullptr);
+        canvasPipelineLayout_ = VK_NULL_HANDLE;
+    }
+    if (canvasVertices_.memory != VK_NULL_HANDLE && canvasVertices_.mapped != nullptr) {
+        vkUnmapMemory(device_, canvasVertices_.memory);
+        canvasVertices_.mapped = nullptr;
+    }
+    if (canvasVertices_.buffer != VK_NULL_HANDLE) {
+        vkDestroyBuffer(device_, canvasVertices_.buffer, nullptr);
+        canvasVertices_.buffer = VK_NULL_HANDLE;
+    }
+    if (canvasVertices_.memory != VK_NULL_HANDLE) {
+        vkFreeMemory(device_, canvasVertices_.memory, nullptr);
+        canvasVertices_.memory = VK_NULL_HANDLE;
+    }
+    canvasVertices_.capacity = 0;
+    canvasVertices_.used = 0;
 }
 
 } // namespace core::render::vulkan

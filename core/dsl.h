@@ -4,6 +4,7 @@
 #include "core/animation.h"
 #include "core/input/input_types.h"
 #include "core/render/image_types.h"
+#include "core/render/canvas.h"
 #include "core/render/render_types.h"
 #include "core/render/text_types.h"
 
@@ -54,7 +55,8 @@ enum class ElementKind {
     Polygon,
     Text,
     Image,
-    Svg
+    Svg,
+    Canvas
 };
 
 enum class HitTestMode {
@@ -136,6 +138,8 @@ struct Element {
     bool imageHasCoverViewport = false;
     Vec2 imageCoverViewportSize;
     Vec2 imageCoverViewportOffset;
+
+    std::function<void(core::render::CanvasContext&)> onDraw;
 
     bool interactive = false;
     bool focusable = false;
@@ -1309,6 +1313,16 @@ public:
     }
 };
 
+class CanvasBuilder : public BuilderBase<CanvasBuilder> {
+public:
+    CanvasBuilder(Ui& ui, Element* element) : BuilderBase<CanvasBuilder>(ui, element) {}
+
+    CanvasBuilder& onDraw(std::function<void(core::render::CanvasContext&)> callback) {
+        element_->onDraw = std::move(callback);
+        return *this;
+    }
+};
+
 class Ui {
 public:
     void begin(const std::string& pageId = "") {
@@ -1366,6 +1380,10 @@ public:
 
     SvgBuilder svg(const std::string& id) {
         return SvgBuilder(*this, addElement(ElementKind::Svg, id));
+    }
+
+    CanvasBuilder canvas(const std::string& id = "") {
+        return CanvasBuilder(*this, addElement(ElementKind::Canvas, id));
     }
 
     void layout(float width, float height) {
@@ -1533,6 +1551,8 @@ private:
             prefix = "__image";
         } else if (kind == ElementKind::Svg) {
             prefix = "__svg";
+        } else if (kind == ElementKind::Canvas) {
+            prefix = "__canvas";
         }
         return resolveId(std::string(prefix) + "." + std::to_string(generatedId_++));
     }

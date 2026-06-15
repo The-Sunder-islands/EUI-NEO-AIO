@@ -9,10 +9,15 @@ enum class HitTestMode;
 enum class LoaderMode;
 } // namespace core::dsl
 
+namespace core::render {
+class CanvasContext;
+} // namespace core::render
+
 namespace eui {
 
 using Ui = core::dsl::Ui;
 using Screen = core::dsl::Screen;
+using CanvasContext = core::render::CanvasContext;
 
 inline std::string utf8(unsigned int codepoint) {
     std::string result;

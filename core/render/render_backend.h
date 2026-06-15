@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/render/canvas.h"
 #include "core/render/primitive_geometry.h"
 #include "core/render/render_surface.h"
 #include "core/window/window_types.h"
@@ -89,6 +90,12 @@ public:
         (void)tint;
         (void)rect;
         (void)radius;
+        (void)windowWidth;
+        (void)windowHeight;
+    }
+
+    virtual void drawCanvasShape(const CanvasDrawCommand& command, int windowWidth, int windowHeight) {
+        (void)command;
         (void)windowWidth;
         (void)windowHeight;
     }

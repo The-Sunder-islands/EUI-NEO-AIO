@@ -180,6 +180,7 @@ inline void Runtime::shutdown(bool releaseCachedImageTextures) {
     polygons_.clear();
     texts_.clear();
     images_.clear();
+    canvases_.clear();
     interactions_.clear();
     dirtyKeys_.clear();
     layouts_.clear();
@@ -212,6 +213,12 @@ inline void Runtime::releaseGraphicsResources(bool releaseCachedImageTextures) {
         }
     }
     for (auto& item : images_) {
+        if (item.second.initialized) {
+            item.second.primitive->destroy();
+            item.second.initialized = false;
+        }
+    }
+    for (auto& item : canvases_) {
         if (item.second.initialized) {
             item.second.primitive->destroy();
             item.second.initialized = false;

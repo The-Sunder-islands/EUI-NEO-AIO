@@ -35,6 +35,7 @@ public:
     void prepareBackdropBlur(const core::Rect& bounds, float blur, int windowWidth, int windowHeight) override;
     void drawRoundedRect(const RoundedRectDrawCommand& command, int windowWidth, int windowHeight) override;
     void drawText(const TextDrawCommand& command, int windowWidth, int windowHeight) override;
+    void drawCanvasShape(const CanvasDrawCommand& command, int windowWidth, int windowHeight) override;
     TextureHandle createTexture(const unsigned char* pixels, int width, int height) override;
     bool updateTexture(TextureHandle handle, const unsigned char* pixels, int width, int height) override;
     void destroyTexture(TextureHandle handle) override;
@@ -109,6 +110,9 @@ private:
                                VkImageLayout oldLayout,
                                VkImageLayout newLayout);
     VkRect2D clampScissor(const core::Rect& rect, int windowWidth, int windowHeight);
+    bool ensureCanvasPipeline();
+    bool ensureCanvasVertexBuffer(std::size_t vertexCount);
+    void destroyCanvasPipeline();
     bool ensureRoundedRectPipeline();
     bool ensureBackdropResources(std::uint32_t width, std::uint32_t height);
     bool ensureBackdropDescriptor();
@@ -179,6 +183,10 @@ private:
     VkDescriptorSet roundedRectDescriptorSet_ = VK_NULL_HANDLE;
     VkPipelineLayout roundedRectPipelineLayout_ = VK_NULL_HANDLE;
     VkPipeline roundedRectPipeline_ = VK_NULL_HANDLE;
+
+    VkPipelineLayout canvasPipelineLayout_ = VK_NULL_HANDLE;
+    VkPipeline canvasPipeline_ = VK_NULL_HANDLE;
+    MappedBuffer canvasVertices_;
     VkImage backdropImage_ = VK_NULL_HANDLE;
     VkDeviceMemory backdropImageMemory_ = VK_NULL_HANDLE;
     VkImageView backdropImageView_ = VK_NULL_HANDLE;

@@ -137,6 +137,14 @@ inline void Runtime::renderElement(
             applyOptionalScissor(renderBackend, effectiveHasScissor, effectiveScissor, windowHeight);
             renderImage(element, windowWidth, windowHeight, dpiScale, renderTransform);
         }
+    } else if (element.kind == ElementKind::Canvas) {
+        Rect visual = toPixelRect(canvasInstance(element.id).frame.value(), dpiScale);
+        visual = applyRenderTransform(visual, renderTransform);
+        if ((!dirtyRect || intersects(visual, *dirtyRect)) &&
+            (!effectiveHasScissor || intersects(visual, effectiveScissor))) {
+            applyOptionalScissor(renderBackend, effectiveHasScissor, effectiveScissor, windowHeight);
+            renderCanvas(renderBackend, element, windowWidth, windowHeight, dpiScale, renderTransform);
+        }
     }
 
     const std::vector<const Element*> children = orderedElements(element.children);
@@ -331,6 +339,34 @@ inline void Runtime::renderImage(
                                          {toPixels(instance.coverViewportOffset.x, dpiScale),
                                           toPixels(instance.coverViewportOffset.y, dpiScale)});
     instance.primitive->render(windowWidth, windowHeight);
+}
+
+inline void Runtime::renderCanvas(
+    core::render::RenderBackend& renderBackend,
+    const Element& element,
+    int windowWidth,
+    int windowHeight,
+    float dpiScale,
+    const RenderTransform& renderTransform) {
+    runtime::CanvasInstance& instance = canvasInstance(element.id);
+    if (!instance.initialized) {
+        if (!instance.primitive->initialize()) {
+            return;
+        }
+        instance.initialized = true;
+    }
+
+    const Rect frame = toPixelRect(instance.frame.value(), dpiScale);
+    Transform transform = scaleTransform(instance.transform.value(), dpiScale);
+
+    instance.primitive->setBounds(frame.x, frame.y, frame.width, frame.height);
+    instance.primitive->setTransformMatrix(combinedPrimitiveMatrix(renderTransform, frame, transform));
+    instance.primitive->setOpacity(instance.opacity.value() * renderTransform.opacity);
+
+    if (instance.onDraw) {
+        instance.primitive->prepare(instance.onDraw);
+    }
+    instance.primitive->render(renderBackend, windowWidth, windowHeight);
 }
 
 } // namespace core::dsl

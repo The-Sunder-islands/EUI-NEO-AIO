@@ -110,6 +110,11 @@ inline Rect Runtime::visualDirtyRectForElement(
         const LayoutRect frame = instance != images_.end() ? instance->second.frame.value() : element.frame;
         const Transform transform = instance != images_.end() ? instance->second.transform.value() : element.transform;
         local = imageVisualRect(frame, transform);
+    } else if (element.kind == ElementKind::Canvas) {
+        const auto instance = canvases_.find(element.id);
+        const LayoutRect frame = instance != canvases_.end() ? instance->second.frame.value() : element.frame;
+        const Transform transform = instance != canvases_.end() ? instance->second.transform.value() : element.transform;
+        local = transformRect({frame.x, frame.y, frame.width, frame.height}, frame, transform);
     }
     return applyRenderTransformToLogicalRect(local, dpiScale, renderTransform);
 }
@@ -307,6 +312,12 @@ inline runtime::ImageInstance& Runtime::imageInstance(const std::string& id) {
     return instance;
 }
 
+inline runtime::CanvasInstance& Runtime::canvasInstance(const std::string& id) {
+    runtime::CanvasInstance& instance = canvases_.try_emplace(id).first->second;
+    instance.seen = true;
+    return instance;
+}
+
 inline runtime::InteractionInstance& Runtime::interactionInstance(const std::string& id) {
     runtime::InteractionInstance& instance = interactions_.try_emplace(id).first->second;
     instance.seen = true;
@@ -346,6 +357,7 @@ inline void Runtime::markInstancesUnseen() {
     runtime::markEntriesUnseen(polygons_);
     runtime::markEntriesUnseen(texts_);
     runtime::markEntriesUnseen(images_);
+    runtime::markEntriesUnseen(canvases_);
     runtime::markEntriesUnseen(interactions_);
     runtime::markEntriesUnseen(dirtyKeys_);
     runtime::markEntriesUnseen(layouts_);
@@ -367,6 +379,7 @@ inline void Runtime::releaseUnseenInstances() {
     runtime::releaseUnseenEntries(polygons_, releasePrimitive);
     runtime::releaseUnseenEntries(texts_, releasePrimitive);
     runtime::releaseUnseenEntries(images_, releasePrimitive);
+    runtime::releaseUnseenEntries(canvases_, releasePrimitive);
     runtime::releaseUnseenEntries(interactions_, noop);
     runtime::releaseUnseenEntries(dirtyKeys_, noop);
     runtime::releaseUnseenEntries(layouts_, noop);
@@ -698,6 +711,8 @@ inline void Runtime::updateElementTree(
         updateText(element, deltaSeconds, dpiScale, inheritedTransform, ancestorFrameChanged);
     } else if (element.kind == ElementKind::Image || element.kind == ElementKind::Svg) {
         updateImage(element, deltaSeconds, dpiScale, inheritedTransform, ancestorFrameChanged);
+    } else if (element.kind == ElementKind::Canvas) {
+        updateCanvas(element, deltaSeconds, dpiScale, inheritedTransform, ancestorFrameChanged);
     }
 
     const bool childAncestorFrameChanged = ancestorFrameChanged || frameTargetChanged;
@@ -1007,6 +1022,46 @@ inline void Runtime::updateImage(
         addDirtyUnion(beforeRect, afterRect);
     }
     animating_ = animating_ || isImageAnimating(instance);
+}
+
+inline void Runtime::updateCanvas(
+    const Element& element,
+    float deltaSeconds,
+    float dpiScale,
+    const RenderTransform& inheritedTransform,
+    bool snapFrame) {
+    runtime::CanvasInstance& instance = canvasInstance(element.id);
+    const Rect beforeRect = applyRenderTransformToLogicalRect(
+        transformRect({instance.frame.value().x, instance.frame.value().y,
+                       instance.frame.value().width, instance.frame.value().height},
+                      instance.frame.value(),
+                      instance.transform.value()),
+        dpiScale,
+        inheritedTransform);
+
+    bool changed = false;
+    changed = instance.frame.setTarget(element.frame, element.transition, !snapFrame && shouldAnimateFrame(element)) || changed;
+    changed = instance.opacity.setTarget(element.opacity, element.transition, shouldAnimate(element, AnimProperty::Opacity)) || changed;
+    changed = instance.transform.setTarget(core::dsl::runtimeTransformForElement(element, scrollStates_, sliderStates_, element.transform), element.transition, shouldAnimate(element, AnimProperty::Transform)) || changed;
+
+    changed = instance.frame.tick(deltaSeconds) || changed;
+    changed = instance.opacity.tick(deltaSeconds) || changed;
+    changed = instance.transform.tick(deltaSeconds) || changed;
+
+    instance.onDraw = element.onDraw;
+
+    if (changed) {
+        const Rect afterRect = applyRenderTransformToLogicalRect(
+            transformRect({instance.frame.value().x, instance.frame.value().y,
+                           instance.frame.value().width, instance.frame.value().height},
+                          instance.frame.value(),
+                          instance.transform.value()),
+            dpiScale,
+            inheritedTransform);
+        addDirtyUnion(beforeRect, afterRect);
+    }
+
+    animating_ = animating_ || changed;
 }
 
 } // namespace core::dsl

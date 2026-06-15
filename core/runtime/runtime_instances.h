@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/dsl.h"
+#include "core/render/canvas.h"
 #include "core/render/image.h"
 #include "core/render/primitive.h"
 #include "core/render/text.h"
@@ -101,6 +102,16 @@ struct ImageInstance {
     bool hasCoverViewport = false;
     Vec2 coverViewportSize;
     Vec2 coverViewportOffset;
+};
+
+struct CanvasInstance {
+    std::unique_ptr<core::render::CanvasPrimitive> primitive = std::make_unique<core::render::CanvasPrimitive>();
+    bool initialized = false;
+    bool seen = false;
+    AnimatedValue<LayoutRect> frame;
+    AnimatedValue<float> opacity;
+    AnimatedValue<Transform> transform;
+    std::function<void(core::render::CanvasContext&)> onDraw;
 };
 
 struct InteractionInstance {

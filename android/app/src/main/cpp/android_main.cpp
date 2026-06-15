@@ -2,6 +2,9 @@
 
 #include "eui/detail/dsl_app_impl.h"
 #include "core/input/input_state.h"
+#include "core/render/render_backend.h"
+#include "core/render/render_surface.h"
+#include "core/window/window_backend.h"
 
 #include <algorithm>
 #include <chrono>
@@ -82,6 +85,13 @@ static bool runWindowSession() {
 
     app::initialize(window);
 
+    auto renderBackend = core::render::createRenderBackend(window);
+    if (!renderBackend) {
+        __android_log_print(ANDROID_LOG_ERROR, "EUI", "createRenderBackend failed");
+        eui_android_release_egl(window);
+        return !eui_android_exit_requested();
+    }
+
     WindowState ws;
     double lastFrameTime = glfwGetTime();
     ws.nextFrameTime = lastFrameTime;
@@ -120,8 +130,16 @@ static bool runWindowSession() {
         eui_android_poll_ime_frame();
 
         if (ws.needsRender) {
+            renderBackend->beginFrame({
+                window,
+                core::window::nativeWindowInfo(window),
+                fbW,
+                fbH,
+                dpiScale
+            });
+            core::render::ScopedRenderBackend scoped(*renderBackend);
             app::render(fbW, fbH, dpiScale);
-            glfwSwapBuffers(window);
+            renderBackend->present();
             ws.needsRender = false;
         }
 

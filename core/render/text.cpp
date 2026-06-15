@@ -15,6 +15,10 @@
 #include "core/render/text.h"
 #include "core/render/render_backend.h"
 
+#ifdef __ANDROID__
+#include <android/log.h>
+#endif
+
 #include <ft2build.h>
 #include FT_FREETYPE_H
 
@@ -328,13 +332,22 @@ bool isEmojiFontPath(const std::string& path) {
 bool loadFontFace(const std::string& path, float fontSize, FontFace& face) {
     FT_Library library = sharedFreeTypeLibrary();
     if (!library) {
+#ifdef __ANDROID__
+        __android_log_print(ANDROID_LOG_ERROR, "EUI_FT", "no freetype library");
+#endif
         return false;
     }
 
     FT_Face loadedFace = nullptr;
     if (FT_New_Face(library, path.c_str(), 0, &loadedFace) != 0 || !loadedFace) {
+#ifdef __ANDROID__
+        __android_log_print(ANDROID_LOG_ERROR, "EUI_FT", "FT_New_Face failed: %s", path.c_str());
+#endif
         return false;
     }
+#ifdef __ANDROID__
+    __android_log_print(ANDROID_LOG_INFO, "EUI_FT", "FT_New_Face OK: %s", path.c_str());
+#endif
 
     const bool emojiFont = isEmojiFontPath(path);
     float pixelHeightScale = 1.0f;

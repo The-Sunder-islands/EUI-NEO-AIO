@@ -84,11 +84,7 @@ static bool runWindowSession() {
         return !eui_android_exit_requested();
     }
 
-    // Force a complete redraw on the first frame: the EGL context is brand-new
-    // so all cached GL resource IDs from the previous context are garbage.
-    // releaseGraphicsResources (called at the end of the prior session) already
-    // destroyed per-element primitives in the old context; we just need to tell
-    // the runtime to rebuild its element tree on the next compose.
+    app::resetRuntime();
     app::initialize(window);
     core::installInputCallbacks(window);
 

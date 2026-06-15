@@ -285,12 +285,12 @@ void shutdown() {
     eui::network::shutdown();
 }
 
-// Full reset between Android surface recreation cycles. Destroys the runtime's
-// element tree and resets app state so the next session starts fresh (new GL
-// context = new resource handles, font atlases, etc.).
-void resetRuntime() {
-    detail::dslRuntime().shutdown();
-    detail::dslAppState() = {};
+// Invalidate the composed state so the next frame triggers a full recompose.
+// Called after Android surface recreation to rebuild the UI tree in the new
+// GL context. Unlike resetRuntime(), this preserves the runtime's internal
+// caches (glyph atlas, font handles) which are recreated on demand.
+void invalidateCompose() {
+    detail::dslAppState().composed = false;
 }
 
 } // namespace app

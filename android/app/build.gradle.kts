@@ -16,7 +16,10 @@ android {
 
         externalNativeBuild {
             cmake {
-                arguments("-DANDROID_STL=c++_static")
+                arguments(
+                    "-DANDROID_STL=c++_static",
+                    "-DEUI_RENDER_BACKEND=${project.findProperty("euiRenderBackend") ?: "opengl"}"
+                )
                 cppFlags("-std=c++17")
             }
         }

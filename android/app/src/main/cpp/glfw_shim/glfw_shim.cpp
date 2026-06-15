@@ -118,6 +118,10 @@ namespace {
     GLFWvidmode  g_videoMode = {1080, 1920, 8, 8, 8, 60};
     bool         g_glfwInitialized = false;
     double       g_startTime = 0.0;
+    int          g_clientApi = GLFW_OPENGL_API;
+
+    // Vulkan loader function pointer (set by glfwInitVulkanLoader)
+    PFN_vkGetInstanceProcAddr g_vkGetInstanceProcAddr = nullptr;
 
     double nowSeconds() {
         auto now = std::chrono::steady_clock::now();
@@ -158,8 +162,12 @@ int glfwInit(void) {
 
 void glfwTerminate(void) { g_glfwInitialized = false; }
 void glfwInitHint(int, int) {}
-void glfwDefaultWindowHints(void) {}
-void glfwWindowHint(int, int) {}
+void glfwDefaultWindowHints(void) { g_clientApi = GLFW_OPENGL_API; }
+void glfwWindowHint(int hint, int value) {
+    if (hint == GLFW_CLIENT_API) {
+        g_clientApi = value;
+    }
+}
 
 GLFWwindow* glfwCreateWindow(int width, int height, const char*,
                               GLFWmonitor*, GLFWwindow*) {
@@ -187,69 +195,70 @@ GLFWwindow* glfwCreateWindow(int width, int height, const char*,
 
     ANativeWindow_setBuffersGeometry(nw, 0, 0, AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM);
 
-    EGLDisplay dpy = eglGetDisplay(EGL_DEFAULT_DISPLAY);
-    if (dpy == EGL_NO_DISPLAY) {
-        __android_log_print(ANDROID_LOG_ERROR, "EUI", "eglGetDisplay failed: 0x%x", eglGetError());
-        delete w; return nullptr;
-    }
+    if (g_clientApi != GLFW_NO_API) {
+        EGLDisplay dpy = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+        if (dpy == EGL_NO_DISPLAY) {
+            __android_log_print(ANDROID_LOG_ERROR, "EUI", "eglGetDisplay failed: 0x%x", eglGetError());
+            delete w; return nullptr;
+        }
 
-    EGLint maj, min;
-    if (!eglInitialize(dpy, &maj, &min)) {
-        __android_log_print(ANDROID_LOG_ERROR, "EUI", "eglInitialize failed: 0x%x", eglGetError());
-        delete w; return nullptr;
-    }
-    __android_log_print(ANDROID_LOG_INFO, "EUI", "EGL initialized: %d.%d", maj, min);
+        EGLint maj, min;
+        if (!eglInitialize(dpy, &maj, &min)) {
+            __android_log_print(ANDROID_LOG_ERROR, "EUI", "eglInitialize failed: 0x%x", eglGetError());
+            delete w; return nullptr;
+        }
+        __android_log_print(ANDROID_LOG_INFO, "EUI", "EGL initialized: %d.%d", maj, min);
 
-    // Widened from ES3_BIT to ES2|ES3 so software / older emulator EGL stacks
-    // that only tag their window configs with ES2_BIT still match. We still
-    // ask for an ES3 context below (ctxAttr) — most drivers will hand one out
-    // even when the config itself is marked ES2.
-    const EGLint cfgAttr[] = {
-        EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
-        EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT | EGL_OPENGL_ES3_BIT,
-        EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8, EGL_ALPHA_SIZE, 8,
-        EGL_NONE
-    };
-    EGLint nCfg; EGLConfig cfg;
-    if (!eglChooseConfig(dpy, cfgAttr, &cfg, 1, &nCfg) || nCfg == 0) {
-        __android_log_print(ANDROID_LOG_ERROR, "EUI",
-            "eglChooseConfig: matched=%d err=0x%x", nCfg, eglGetError());
-        eglTerminate(dpy); delete w; return nullptr;
-    }
-    EGLint cfgId = 0, cfgRenderable = 0;
-    eglGetConfigAttrib(dpy, cfg, EGL_CONFIG_ID, &cfgId);
-    eglGetConfigAttrib(dpy, cfg, EGL_RENDERABLE_TYPE, &cfgRenderable);
-    __android_log_print(ANDROID_LOG_INFO, "EUI",
-        "chosen EGLConfig id=%d renderable=0x%x", cfgId, cfgRenderable);
+        const EGLint cfgAttr[] = {
+            EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
+            EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT | EGL_OPENGL_ES3_BIT,
+            EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8, EGL_ALPHA_SIZE, 8,
+            EGL_NONE
+        };
+        EGLint nCfg; EGLConfig cfg;
+        if (!eglChooseConfig(dpy, cfgAttr, &cfg, 1, &nCfg) || nCfg == 0) {
+            __android_log_print(ANDROID_LOG_ERROR, "EUI",
+                "eglChooseConfig: matched=%d err=0x%x", nCfg, eglGetError());
+            eglTerminate(dpy); delete w; return nullptr;
+        }
+        EGLint cfgId = 0, cfgRenderable = 0;
+        eglGetConfigAttrib(dpy, cfg, EGL_CONFIG_ID, &cfgId);
+        eglGetConfigAttrib(dpy, cfg, EGL_RENDERABLE_TYPE, &cfgRenderable);
+        __android_log_print(ANDROID_LOG_INFO, "EUI",
+            "chosen EGLConfig id=%d renderable=0x%x", cfgId, cfgRenderable);
 
-    const EGLint ctxAttr[] = { EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE };
-    EGLContext ctx = eglCreateContext(dpy, cfg, EGL_NO_CONTEXT, ctxAttr);
-    if (ctx == EGL_NO_CONTEXT) {
-        __android_log_print(ANDROID_LOG_ERROR, "EUI",
-            "eglCreateContext(ES3) failed: 0x%x", eglGetError());
-        eglTerminate(dpy); delete w; return nullptr;
-    }
+        const EGLint ctxAttr[] = { EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE };
+        EGLContext ctx = eglCreateContext(dpy, cfg, EGL_NO_CONTEXT, ctxAttr);
+        if (ctx == EGL_NO_CONTEXT) {
+            __android_log_print(ANDROID_LOG_ERROR, "EUI",
+                "eglCreateContext(ES3) failed: 0x%x", eglGetError());
+            eglTerminate(dpy); delete w; return nullptr;
+        }
 
-    EGLSurface sfc = eglCreateWindowSurface(dpy, cfg, nw, nullptr);
-    if (sfc == EGL_NO_SURFACE) {
-        __android_log_print(ANDROID_LOG_ERROR, "EUI",
-            "eglCreateWindowSurface failed: 0x%x", eglGetError());
-        eglDestroyContext(dpy, ctx); eglTerminate(dpy); delete w; return nullptr;
-    }
+        EGLSurface sfc = eglCreateWindowSurface(dpy, cfg, nw, nullptr);
+        if (sfc == EGL_NO_SURFACE) {
+            __android_log_print(ANDROID_LOG_ERROR, "EUI",
+                "eglCreateWindowSurface failed: 0x%x", eglGetError());
+            eglDestroyContext(dpy, ctx); eglTerminate(dpy); delete w; return nullptr;
+        }
 
-    w->egl.display = dpy; w->egl.config = cfg;
-    w->egl.context = ctx;  w->egl.surface = sfc;
+        w->egl.display = dpy; w->egl.config = cfg;
+        w->egl.context = ctx;  w->egl.surface = sfc;
 
-    if (!eglMakeCurrent(dpy, sfc, sfc, ctx)) {
-        __android_log_print(ANDROID_LOG_ERROR, "EUI",
-            "eglMakeCurrent failed: 0x%x", eglGetError());
-        eglDestroySurface(dpy, sfc); eglDestroyContext(dpy, ctx);
-        eglTerminate(dpy); delete w; return nullptr;
+        if (!eglMakeCurrent(dpy, sfc, sfc, ctx)) {
+            __android_log_print(ANDROID_LOG_ERROR, "EUI",
+                "eglMakeCurrent failed: 0x%x", eglGetError());
+            eglDestroySurface(dpy, sfc); eglDestroyContext(dpy, ctx);
+            eglTerminate(dpy); delete w; return nullptr;
+        }
+        __android_log_print(ANDROID_LOG_INFO, "EUI", "createWindow: EGL ok, w=%p display=%p ctx=%p sfc=%p",
+                            (void*)w, (void*)dpy, (void*)ctx, (void*)sfc);
+        __android_log_print(ANDROID_LOG_INFO, "EUI", "createWindow: GL_VERSION=%s",
+                            (const char*)glGetString(GL_VERSION));
+    } else {
+        __android_log_print(ANDROID_LOG_INFO, "EUI", "createWindow: Vulkan mode (no EGL), w=%p nw=%p",
+                            (void*)w, (void*)nw);
     }
-    __android_log_print(ANDROID_LOG_INFO, "EUI", "createWindow: EGL ok, w=%p display=%p ctx=%p sfc=%p",
-                        (void*)w, (void*)dpy, (void*)ctx, (void*)sfc);
-    __android_log_print(ANDROID_LOG_INFO, "EUI", "createWindow: GL_VERSION=%s",
-                        (const char*)glGetString(GL_VERSION));
 
     g_currentWindow = w;
     return w;
@@ -257,13 +266,15 @@ GLFWwindow* glfwCreateWindow(int width, int height, const char*,
 
 void glfwDestroyWindow(GLFWwindow* w) {
     if (!w) return;
-    if (g_currentWindow == w) {
-        eglMakeCurrent(w->egl.display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-        g_currentWindow = nullptr;
+    if (g_clientApi != GLFW_NO_API) {
+        if (g_currentWindow == w) {
+            eglMakeCurrent(w->egl.display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+            g_currentWindow = nullptr;
+        }
+        if (w->egl.surface != EGL_NO_SURFACE) eglDestroySurface(w->egl.display, w->egl.surface);
+        if (w->egl.context != EGL_NO_CONTEXT) eglDestroyContext(w->egl.display, w->egl.context);
+        if (w->egl.display != EGL_NO_DISPLAY) eglTerminate(w->egl.display);
     }
-    if (w->egl.surface != EGL_NO_SURFACE) eglDestroySurface(w->egl.display, w->egl.surface);
-    if (w->egl.context != EGL_NO_CONTEXT) eglDestroyContext(w->egl.display, w->egl.context);
-    if (w->egl.display != EGL_NO_DISPLAY) eglTerminate(w->egl.display);
     delete w;
 }
 
@@ -302,6 +313,10 @@ GLFWmonitor* glfwGetWindowMonitor(GLFWwindow*) { return g_primaryMonitor; }
 GLFWwindow* glfwGetCurrentContext(void) { return g_currentWindow; }
 
 void glfwMakeContextCurrent(GLFWwindow* w) {
+    if (g_clientApi == GLFW_NO_API) {
+        g_currentWindow = w;
+        return;
+    }
     if (!w) {
         eglMakeCurrent(EGL_NO_DISPLAY, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
         g_currentWindow = nullptr;
@@ -312,6 +327,7 @@ void glfwMakeContextCurrent(GLFWwindow* w) {
 }
 
 void glfwSwapBuffers(GLFWwindow* w) {
+    if (g_clientApi == GLFW_NO_API) return;
     if (w && w->egl.display != EGL_NO_DISPLAY)
         eglSwapBuffers(w->egl.display, w->egl.surface);
 }
@@ -537,6 +553,60 @@ void glfwWaitEventsTimeout(double timeout) {
 }
 
 const char* glfwGetError(int*) { return nullptr; }
+
+// ================================================================
+// Vulkan integration
+// ================================================================
+
+void glfwInitVulkanLoader(PFN_vkGetInstanceProcAddr loader) {
+    g_vkGetInstanceProcAddr = loader;
+}
+
+const char** glfwGetRequiredInstanceExtensions(uint32_t* count) {
+    static const char* extensions[] = {
+        "VK_KHR_surface",
+        "VK_KHR_android_surface"
+    };
+    if (count) *count = 2;
+    return extensions;
+}
+
+VkResult glfwCreateWindowSurface(VkInstance instance, GLFWwindow* window,
+                                  const VkAllocationCallbacks* allocator,
+                                  VkSurfaceKHR* surface) {
+    if (!g_vkGetInstanceProcAddr || !window || !window->nativeWindow) {
+        __android_log_print(ANDROID_LOG_ERROR, "EUI",
+            "glfwCreateWindowSurface: missing vk loader or native window");
+        return -1; // VK_ERROR_EXTENSION_NOT_PRESENT
+    }
+
+    typedef VkResult (*CreateSurfaceFn)(
+        VkInstance,
+        const void*,
+        const VkAllocationCallbacks*,
+        VkSurfaceKHR*);
+
+    auto fn = (CreateSurfaceFn)
+        g_vkGetInstanceProcAddr(instance, "vkCreateAndroidSurfaceKHR");
+    if (!fn) {
+        __android_log_print(ANDROID_LOG_ERROR, "EUI",
+            "glfwCreateWindowSurface: vkCreateAndroidSurfaceKHR not found");
+        return -1;
+    }
+
+    // Define the struct layout locally; ABI matches VkAndroidSurfaceCreateInfoKHR.
+    // VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR = 1000008000
+    struct {
+        int32_t        sType;
+        const void*    pNext;
+        uint32_t       flags;
+        ANativeWindow* window;
+    } info{};
+    info.sType = 1000008000;
+    info.window = window->nativeWindow;
+
+    return fn(instance, &info, allocator, surface);
+}
 
 // ================================================================
 // Surface lifecycle helpers used by the native main loop

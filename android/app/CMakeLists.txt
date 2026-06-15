@@ -7,6 +7,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
+# Render backend selection (set from Gradle via -DANDROID_STL=c++_static -DEUI_RENDER_BACKEND=vulkan)
+set(EUI_RENDER_BACKEND "opengl" CACHE STRING "Render backend: opengl or vulkan")
+set_property(CACHE EUI_RENDER_BACKEND PROPERTY STRINGS opengl vulkan)
+
 # Paths
 set(EUI_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../..)
 set(SHIM_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/src/main/cpp)
@@ -14,7 +18,6 @@ set(SHIM_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/src/main/cpp)
 # Include directories (shims first to override original GLFW/glad)
 include_directories(
     ${SHIM_ROOT}/glfw_shim
-    ${SHIM_ROOT}/glad_gles
     ${EUI_ROOT}
     ${EUI_ROOT}/include
     ${EUI_ROOT}/3rd
@@ -23,6 +26,10 @@ include_directories(
     ${EUI_ROOT}/3rd/libpng-1.6.43
     ${EUI_ROOT}/3rd/zlib-1.3.1
 )
+
+if(EUI_RENDER_BACKEND STREQUAL "vulkan")
+    include_directories(${SHIM_ROOT}/glad_gles)
+endif()
 
 # Source files
 set(SHIM_SOURCES
@@ -48,12 +55,25 @@ set(EUI_CORE_SOURCES
     ${EUI_ROOT}/core/render/render_backend.cpp
     ${EUI_ROOT}/core/render/stb_image_impl.cpp
     ${EUI_ROOT}/core/render/text.cpp
-    ${EUI_ROOT}/core/render/opengl/opengl_backend.cpp
-    ${EUI_ROOT}/core/render/opengl/opengl_image.cpp
-    ${EUI_ROOT}/core/render/opengl/opengl_primitives.cpp
-    ${EUI_ROOT}/core/render/opengl/opengl_text.cpp
     ${EUI_ROOT}/core/window/window_backend.cpp
 )
+
+if(EUI_RENDER_BACKEND STREQUAL "vulkan")
+    list(APPEND EUI_CORE_SOURCES
+        ${EUI_ROOT}/core/render/vulkan/vulkan_backend.cpp
+        ${EUI_ROOT}/core/render/vulkan/vulkan_cache.cpp
+        ${EUI_ROOT}/core/render/vulkan/vulkan_primitives.cpp
+        ${EUI_ROOT}/core/render/vulkan/vulkan_text.cpp
+        ${EUI_ROOT}/core/render/vulkan/vulkan_image.cpp
+    )
+else()
+    list(APPEND EUI_CORE_SOURCES
+        ${EUI_ROOT}/core/render/opengl/opengl_backend.cpp
+        ${EUI_ROOT}/core/render/opengl/opengl_image.cpp
+        ${EUI_ROOT}/core/render/opengl/opengl_primitives.cpp
+        ${EUI_ROOT}/core/render/opengl/opengl_text.cpp
+    )
+endif()
 
 # Minimal FreeType sources for Android build
 set(FREETYPE_SOURCES
@@ -113,32 +133,49 @@ add_library(eui-neo SHARED
     ${EUI_CORE_SOURCES}
 )
 
-# Compile definitions
+# Compile definitions (common)
 target_compile_definitions(eui-neo PRIVATE
     __ANDROID__
     GLFW_INCLUDE_NONE
-    EUI_RENDER_BACKEND_OPENGL=1
     FT2_BUILD_LIBRARY=1
     FT_CONFIG_OPTION_SYSTEM_ZLIB=0
 )
 
-# Force-include GLSL compatibility header
-target_compile_options(eui-neo PRIVATE
-    -include ${SHIM_ROOT}/eui_android_config.h
-)
+if(EUI_RENDER_BACKEND STREQUAL "vulkan")
+    target_compile_definitions(eui-neo PRIVATE
+        EUI_RENDER_BACKEND_VULKAN=1
+    )
+else()
+    target_compile_definitions(eui-neo PRIVATE
+        EUI_RENDER_BACKEND_OPENGL=1
+    )
+    # Force-include GLSL compatibility header (only for OpenGL)
+    target_compile_options(eui-neo PRIVATE
+        -include ${SHIM_ROOT}/eui_android_config.h
+    )
+endif()
 
-# Link Android system libraries
+# Link system libraries
 find_library(log-lib log)
 find_library(android-lib android)
-find_library(egl-lib EGL)
-find_library(glesv3-lib GLESv3)
 
-target_link_libraries(eui-neo
-    ${log-lib}
-    ${android-lib}
-    ${egl-lib}
-    ${glesv3-lib}
-)
+if(EUI_RENDER_BACKEND STREQUAL "vulkan")
+    find_library(vulkan-lib vulkan)
+    target_link_libraries(eui-neo
+        ${log-lib}
+        ${android-lib}
+        ${vulkan-lib}
+    )
+else()
+    find_library(egl-lib EGL)
+    find_library(glesv3-lib GLESv3)
+    target_link_libraries(eui-neo
+        ${log-lib}
+        ${android-lib}
+        ${egl-lib}
+        ${glesv3-lib}
+    )
+endif()
 
 # Compiler flags
 target_compile_options(eui-neo PRIVATE

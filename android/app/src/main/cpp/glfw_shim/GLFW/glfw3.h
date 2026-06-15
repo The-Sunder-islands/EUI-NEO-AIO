@@ -2,10 +2,21 @@
 #define GLFW_SHIM_GLFW3_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/* Vulkan forward declarations (minimal, no vulkan.h dependency) */
+typedef struct VkInstance_T*          VkInstance;
+typedef struct VkSurfaceKHR_T*        VkSurfaceKHR;
+typedef int                           VkResult;
+struct VkAllocationCallbacks;
+typedef void* (*PFN_vkGetInstanceProcAddr)(VkInstance, const char*);
+#define GLFWAPI
+
+#define VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR 1000008000
 
 typedef struct GLFWwindow  GLFWwindow;
 typedef struct GLFWmonitor GLFWmonitor;
@@ -178,6 +189,13 @@ void glfwPollEvents(void);
 void glfwWaitEvents(void);
 void glfwWaitEventsTimeout(double timeout);
 const char* glfwGetError(int* description);
+
+/* Vulkan integration */
+void        glfwInitVulkanLoader(PFN_vkGetInstanceProcAddr loader);
+const char** glfwGetRequiredInstanceExtensions(uint32_t* count);
+VkResult    glfwCreateWindowSurface(VkInstance instance, GLFWwindow* window,
+                                     const VkAllocationCallbacks* allocator,
+                                     VkSurfaceKHR* surface);
 
 #ifdef __cplusplus
 }

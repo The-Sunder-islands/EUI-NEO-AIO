@@ -74,6 +74,23 @@ static void updateFrameInterval(GLFWwindow* w, WindowState& ws, double now, bool
 // if we should exit entirely.
 static bool runWindowSession() {
     __android_log_print(ANDROID_LOG_INFO, "EUI", "runWindowSession: starting");
+#if defined(EUI_RENDER_BACKEND_VULKAN)
+    glfwDefaultWindowHints();
+    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+#else
+    glfwDefaultWindowHints();
+    glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_API);
+    glfwWindowHint(GLFW_SAMPLES, 0);
+    glfwWindowHint(GLFW_RED_BITS, 8);
+    glfwWindowHint(GLFW_GREEN_BITS, 8);
+    glfwWindowHint(GLFW_BLUE_BITS, 8);
+    glfwWindowHint(GLFW_ALPHA_BITS, 8);
+    glfwWindowHint(GLFW_DEPTH_BITS, 16);
+    glfwWindowHint(GLFW_STENCIL_BITS, 0);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+#endif
     GLFWwindow* window = glfwCreateWindow(1080, 1920, "EUI-NEO", nullptr, nullptr);
     if (!window) {
         __android_log_print(ANDROID_LOG_ERROR, "EUI", "glfwCreateWindow failed");

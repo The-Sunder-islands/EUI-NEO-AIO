@@ -1050,6 +1050,12 @@ inline void Runtime::updateCanvas(
 
     instance.onDraw = element.onDraw;
 
+    // Dynamic canvases with onDraw callback always need re-render (content
+    // may change even when layout frame stays the same).
+    if (instance.onDraw) {
+        changed = true;
+    }
+
     if (changed) {
         const Rect afterRect = applyRenderTransformToLogicalRect(
             transformRect({instance.frame.value().x, instance.frame.value().y,

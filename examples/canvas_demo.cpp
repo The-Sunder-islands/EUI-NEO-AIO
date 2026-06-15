@@ -91,12 +91,11 @@ const DslAppConfig& dslAppConfig() {
 }
 
 void compose(eui::Ui& ui, const eui::Screen& screen) {
-    tick += 0.016f;
-
     ui.canvas("main")
         .size(screen.width, screen.height)
-        .onDraw([&](eui::CanvasContext& ctx) {
-            drawDemo(ctx, screen.width, screen.height);
+        .onDraw([w = screen.width, h = screen.height](eui::CanvasContext& ctx) {
+            tick += 0.016f;
+            drawDemo(ctx, w, h);
         });
 }
 

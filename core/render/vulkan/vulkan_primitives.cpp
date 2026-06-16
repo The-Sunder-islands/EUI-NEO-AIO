@@ -641,7 +641,7 @@ void VulkanRenderBackend::drawCanvasShape(const CanvasDrawCommand& command, int 
     // Actually CanvasPrimitive::render sets rect = {cx, cy, radius, 0} for circles.
     // We need a quad that covers the circle.
     float bx0 = x0, by0 = y0, bx1 = x1, by1 = y1;
-    if (command.kind == CanvasShapeKind::FillCircle || command.kind == CanvasShapeKind::StrokeCircle) {
+    if (command.kind == CanvasShapeKind::FillCircle) {
         float cx = command.rect.x;
         float cy = command.rect.y;
         float r = command.rect.width;
@@ -649,6 +649,22 @@ void VulkanRenderBackend::drawCanvasShape(const CanvasDrawCommand& command, int 
         by0 = cy - r;
         bx1 = cx + r;
         by1 = cy + r;
+    } else if (command.kind == CanvasShapeKind::StrokeCircle) {
+        float cx = command.rect.x;
+        float cy = command.rect.y;
+        float r = command.rect.width;
+        float halfStroke = command.strokeWidth * 0.5f + 1.0f;
+        bx0 = cx - r - halfStroke;
+        by0 = cy - r - halfStroke;
+        bx1 = cx + r + halfStroke;
+        by1 = cy + r + halfStroke;
+    } else if (command.kind == CanvasShapeKind::Line) {
+        // rect = {x1, y1, x2, y2} (start, end) — compute proper bounding box
+        float halfStroke = command.strokeWidth * 0.5f + 1.0f;
+        bx0 = std::min(command.rect.x, command.rect.width) - halfStroke;
+        by0 = std::min(command.rect.y, command.rect.height) - halfStroke;
+        bx1 = std::max(command.rect.x, command.rect.width) + halfStroke;
+        by1 = std::max(command.rect.y, command.rect.height) + halfStroke;
     }
 
     // Triangle 1

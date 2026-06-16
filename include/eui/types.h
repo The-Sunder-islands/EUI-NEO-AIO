@@ -6,6 +6,10 @@
 #include "core/render/render_types.h"
 #include "core/render/text_types.h"
 
+namespace core::dsl {
+struct DragEvent;
+} // namespace core::dsl
+
 namespace eui {
 
 using Align = core::Align;
@@ -28,6 +32,7 @@ using VerticalAlign = core::VerticalAlign;
 using TextStyle = core::TextStyle;
 using CursorShape = core::CursorShape;
 using PointerEvent = core::PointerEvent;
+using DragEvent = core::dsl::DragEvent;
 
 inline Color mixColor(const Color& from, const Color& to, float amount) {
     return core::mixColor(from, to, amount);

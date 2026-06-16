@@ -76,9 +76,9 @@ void main() {
         baseColor = pc.strokeColor;
         float halfStroke = strokeWidth * 0.5;
         float edgeWidth = max(fwidth(dist), 0.5);
-        float alpha = 1.0 - smoothstep(-halfStroke - edgeWidth, -halfStroke + edgeWidth, dist);
+        float alpha = smoothstep(-halfStroke - edgeWidth, -halfStroke + edgeWidth, dist);
         // Also apply the outer edge for strokes
-        float outerAlpha = smoothstep(halfStroke - edgeWidth, halfStroke + edgeWidth, dist);
+        float outerAlpha = 1.0 - smoothstep(halfStroke - edgeWidth, halfStroke + edgeWidth, dist);
         alpha *= outerAlpha;
         if (alpha <= 0.0) {
             discard;

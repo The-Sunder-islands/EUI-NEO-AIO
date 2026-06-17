@@ -7,7 +7,7 @@
 > - **Canvas 2D 绘制基元** — `fillCircle` / `strokeCircle` / `drawLine` 等矢量绘制 API，基于 Vulkan 后端。
 >
 > **侧重点差异：**
-> - **后端支持** — 因为OpenGL ES在移动端存在难以定位的bug，且不同设备表现存在明显差异，为确保跨平台一致性，本仓库将更多侧重 Vulkan 后端。
+> - **后端支持** — 因为移动端的 OpenGL ES 存在难以定位的bug，且不同设备表现存在明显差异，为确保跨平台一致性，本仓库将更多侧重 Vulkan 后端。
 >
 > 本仓库同时维护桌面端（Windows / macOS / Linux）与 Android 端构建。
 >

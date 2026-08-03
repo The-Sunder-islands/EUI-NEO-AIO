@@ -1,3 +1,0 @@
-/home/starlight/EUI-NEO-AIO/android/app/.cxx/Debug/1z4a2e3w/x86_64/CMakeFiles/eui-neo.dir
-/home/starlight/EUI-NEO-AIO/android/app/.cxx/Debug/1z4a2e3w/x86_64/CMakeFiles/edit_cache.dir
-/home/starlight/EUI-NEO-AIO/android/app/.cxx/Debug/1z4a2e3w/x86_64/CMakeFiles/rebuild_cache.dir

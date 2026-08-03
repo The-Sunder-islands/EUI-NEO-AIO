@@ -1,3 +1,0 @@
-ninja: Entering directory `/home/starlight/EUI-NEO-AIO/android/app/.cxx/Debug/413b1j18/arm64-v8a'
-[1/2] Building CXX object CMakeFiles/eui-neo.dir/src/main/cpp/android_main.cpp.o
-[2/2] Linking CXX shared library ../../../../build/intermediates/cxx/Debug/413b1j18/obj/arm64-v8a/libeui-neo.so

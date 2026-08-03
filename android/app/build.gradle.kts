@@ -18,7 +18,7 @@ android {
             cmake {
                 arguments(
                     "-DANDROID_STL=c++_static",
-                    "-DEUI_RENDER_BACKEND=${project.findProperty("euiRenderBackend") ?: "opengl"}"
+                    "-DEUI_RENDER_BACKEND=${project.findProperty("euiRenderBackend") ?: "vulkan"}"
                 )
                 cppFlags("-std=c++17")
             }

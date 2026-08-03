@@ -8,7 +8,7 @@ set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
 # Render backend selection (set from Gradle via -DANDROID_STL=c++_static -DEUI_RENDER_BACKEND=vulkan)
-set(EUI_RENDER_BACKEND "opengl" CACHE STRING "Render backend: opengl or vulkan")
+set(EUI_RENDER_BACKEND "vulkan" CACHE STRING "Render backend: opengl or vulkan")
 set_property(CACHE EUI_RENDER_BACKEND PROPERTY STRINGS opengl vulkan)
 
 # Paths

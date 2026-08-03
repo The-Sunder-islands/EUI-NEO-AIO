@@ -21,6 +21,8 @@ include_directories(
     ${EUI_ROOT}
     ${EUI_ROOT}/include
     ${EUI_ROOT}/3rd
+    ${EUI_ROOT}/3rd/glad/include
+    ${EUI_ROOT}/3rd/yyjson-0.12.0/src
     ${EUI_ROOT}/3rd/freetype/include
     ${EUI_ROOT}/3rd/libpng-1.6.43
     ${EUI_ROOT}/3rd/zlib-1.3.1
@@ -43,15 +45,21 @@ set(ANDROID_SOURCES
 set(EUI_CORE_SOURCES
     ${EUI_ROOT}/core/platform/async.cpp
     ${EUI_ROOT}/core/platform/ime_bridge.c
+    ${EUI_ROOT}/core/platform/json.cpp
     ${EUI_ROOT}/core/platform/network.cpp
     ${EUI_ROOT}/core/platform/native_bridge.c
     ${EUI_ROOT}/core/platform/performance_stats.cpp
     ${EUI_ROOT}/core/platform/platform.cpp
     ${EUI_ROOT}/core/platform/tray_bridge.c
+    ${EUI_ROOT}/core/render/canvas.cpp
     ${EUI_ROOT}/core/render/image.cpp
+    ${EUI_ROOT}/core/render/image_facade.cpp
     ${EUI_ROOT}/core/render/image_source.cpp
     ${EUI_ROOT}/core/render/primitive.cpp
     ${EUI_ROOT}/core/render/render_backend.cpp
+    ${EUI_ROOT}/core/render/shadertoy.cpp
+    ${EUI_ROOT}/core/render/shadertoy_json.cpp
+    ${EUI_ROOT}/core/render/shadertoy_primitive.cpp
     ${EUI_ROOT}/core/render/stb_image_impl.cpp
     ${EUI_ROOT}/core/render/text.cpp
     ${EUI_ROOT}/core/window/window_backend.cpp
@@ -61,6 +69,7 @@ if(EUI_RENDER_BACKEND STREQUAL "vulkan")
     list(APPEND EUI_CORE_SOURCES
         ${EUI_ROOT}/core/render/vulkan/vulkan_backend.cpp
         ${EUI_ROOT}/core/render/vulkan/vulkan_cache.cpp
+        ${EUI_ROOT}/core/render/vulkan/vulkan_canvas.cpp
         ${EUI_ROOT}/core/render/vulkan/vulkan_primitives.cpp
         ${EUI_ROOT}/core/render/vulkan/vulkan_text.cpp
         ${EUI_ROOT}/core/render/vulkan/vulkan_image.cpp
@@ -70,6 +79,7 @@ else()
         ${EUI_ROOT}/core/render/opengl/opengl_backend.cpp
         ${EUI_ROOT}/core/render/opengl/opengl_image.cpp
         ${EUI_ROOT}/core/render/opengl/opengl_primitives.cpp
+        ${EUI_ROOT}/core/render/opengl/opengl_shadertoy.cpp
         ${EUI_ROOT}/core/render/opengl/opengl_text.cpp
     )
 endif()
@@ -124,6 +134,13 @@ set(ZLIB_SOURCES
     ${EUI_ROOT}/3rd/zlib-1.3.1/gzwrite.c
 )
 list(APPEND EUI_CORE_SOURCES ${ZLIB_SOURCES})
+
+# Third-party sources (glad for GL, yyjson for JSON)
+set(EUI_THIRD_SOURCES
+    ${EUI_ROOT}/3rd/glad/src/glad.c
+    ${EUI_ROOT}/3rd/yyjson-0.12.0/src/yyjson.c
+)
+list(APPEND EUI_CORE_SOURCES ${EUI_THIRD_SOURCES})
 
 # Build shared library
 add_library(eui-neo SHARED

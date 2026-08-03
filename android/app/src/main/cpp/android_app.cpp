@@ -96,8 +96,8 @@ bool effectiveDark() {
 
 components::theme::ThemeColorTokens themeColors() {
     auto tokens = effectiveDark()
-        ? components::theme::DarkThemeColors()
-        : components::theme::LightThemeColors();
+        ? components::theme::dark()
+        : components::theme::light();
     tokens.primary = g_pickedColor;
     return tokens;
 }
@@ -530,13 +530,13 @@ void pageControls(core::dsl::Ui& ui, float w) {
             .content([&] {
                 components::radio(ui, "rd.a").size(78.0f, 30.0f).fontSize(14.0f).theme(themeColors())
                     .text("浅色").selected(g_radioSelect == 0)
-                    .onSelect([] { g_radioSelect = 0; saveSettings(); }).build();
+                    .onChange([](bool) { g_radioSelect = 0; saveSettings(); }).build();
                 components::radio(ui, "rd.b").size(78.0f, 30.0f).fontSize(14.0f).theme(themeColors())
                     .text("深色").selected(g_radioSelect == 1)
-                    .onSelect([] { g_radioSelect = 1; saveSettings(); }).build();
+                    .onChange([](bool) { g_radioSelect = 1; saveSettings(); }).build();
                 components::radio(ui, "rd.c").size(78.0f, 30.0f).fontSize(14.0f).theme(themeColors())
                     .text("自动").selected(g_radioSelect == 2)
-                    .onSelect([] { g_radioSelect = 2; saveSettings(); }).build();
+                    .onChange([](bool) { g_radioSelect = 2; saveSettings(); }).build();
             });
     });
 }
@@ -571,11 +571,11 @@ void pageInput(core::dsl::Ui& ui, float w) {
     cardSection(ui, "inp", cardW, 160.0f, [&] {
         components::input(ui, "inp.en").size(innerW, 44.0f).theme(themeColors())
             .placeholder("Type something...")
-            .text(g_input).onChange([](const std::string& v) { g_input = v; saveSettings(); }).build();
+            .value(g_input).onChange([](const std::string& v) { g_input = v; saveSettings(); }).build();
 
         components::input(ui, "inp.cn").size(innerW, 44.0f).theme(themeColors())
             .placeholder("中文输入测试")
-            .text(g_inputCn).onChange([](const std::string& v) { g_inputCn = v; saveSettings(); }).build();
+            .value(g_inputCn).onChange([](const std::string& v) { g_inputCn = v; saveSettings(); }).build();
     });
 
     sectionTitle(ui, "seg", "分段与步进 Segmented / Tabs / Stepper", "", cardW);
@@ -926,10 +926,10 @@ void compose(core::dsl::Ui& ui, const core::dsl::Screen& screen) {
         .secondaryText("取消 Cancel")
         .onPrimary([] { g_dialogOpen = false; showToast("操作已确认"); })
         .onSecondary([] { g_dialogOpen = false; showToast("操作已取消"); })
-        .onClose([] { g_dialogOpen = false; })
+        .onOpenChange([](bool) { g_dialogOpen = false; })
         .build();
 
-    components::datepicker(ui, "dp.cal")
+    components::datePicker(ui, "dp.cal")
         .theme(themeColors())
         .screen(screen.width, screen.height)
         .open(g_datePickerOpen)
@@ -938,7 +938,7 @@ void compose(core::dsl::Ui& ui, const core::dsl::Screen& screen) {
         .onOpenChange([](bool open) { g_datePickerOpen = open; })
         .build();
 
-    components::timepicker(ui, "tp.clock")
+    components::timePicker(ui, "tp.clock")
         .theme(themeColors())
         .screen(screen.width, screen.height)
         .open(g_timePickerOpen)
@@ -947,7 +947,7 @@ void compose(core::dsl::Ui& ui, const core::dsl::Screen& screen) {
         .onOpenChange([](bool open) { g_timePickerOpen = open; })
         .build();
 
-    components::colorpicker(ui, "cp.color")
+    components::colorPicker(ui, "cp.color")
         .theme(themeColors())
         .screen(screen.width, screen.height)
         .open(g_colorPickerOpen)

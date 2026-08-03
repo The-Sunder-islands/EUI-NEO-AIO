@@ -144,7 +144,7 @@ static bool runWindowSession() {
 
         float dpiScale = getDpiScale(window);
         float ptrScale = getPointerScale(window);
-        bool externalReady = core::network::consumeAnyTextReady() || core::async::dispatchReady();
+        const bool externalReady = core::platform::consumeUiUpdate() || core::async::dispatchReady();
 
         if (app::update(window, deltaSeconds, fbW, fbH, dpiScale, ptrScale, externalReady, true)) {
             ws.needsRender = true;
@@ -187,7 +187,6 @@ static bool runWindowSession() {
     // shared-resource maps (keyed by GLFWwindow*) won't keep leaked GLuints.
     app::releaseGraphicsResources();
     core::releaseInputQueue(window);
-    core::window::invalidateContextKey();
     eui_android_release_egl(window);
 
     return !eui_android_exit_requested();
@@ -211,7 +210,7 @@ extern "C" int eui_android_main(void) {
             __android_log_print(ANDROID_LOG_WARN, "EUI", "eui_android_main: no pending window, retry");
             continue;
         }
-        app::invalidateCompose();
+        app::requestUpdate();
         __android_log_print(ANDROID_LOG_INFO, "EUI", "eui_android_main: surface promoted, restarting session");
     }
 

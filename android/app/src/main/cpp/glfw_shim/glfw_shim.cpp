@@ -709,20 +709,6 @@ void callJavaVoidMethod(jmethodID method) {
 // Called by the runtime each frame while a focusable element with an IME
 // rect is focused. We treat each call as a "keep IME visible" ping; if a
 // frame passes without any ping while IME was visible, we hide it.
-extern "C" void eui_ime_set_cursor_rect(GLFWwindow* window, double x, double y, double width, double height) {
-    (void)window; (void)x; (void)y; (void)width; (void)height;
-    auto& bridge = AndroidBridge::instance();
-    bridge.imePingedThisFrame.store(true);
-    if (!bridge.imeVisible.load()) {
-        bridge.imeVisible.store(true);
-        callJavaVoidMethod(bridge.showKeyboardMethod);
-    }
-}
-
-extern "C" int eui_ime_is_composing(GLFWwindow* window) {
-    (void)window;
-    return 0;
-}
 
 // Called once per frame by the native main loop. Hides IME if focus has
 // moved away (no set_cursor_rect ping this frame) while keyboard is visible.

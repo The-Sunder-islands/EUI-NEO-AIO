@@ -258,7 +258,6 @@ public:
         if (floatCount < 4) return false;
         return readShaderToyPixel(handle, rgba);
     }
->>>>>>> v0.5.4
     virtual void clear(const core::Color& color) = 0;
     virtual void setScissor(bool enabled, const core::Rect& rect, int framebufferHeight) = 0;
     virtual void prepareBackdropBlur(const core::Rect& bounds, float blur, int windowWidth, int windowHeight) = 0;
@@ -312,6 +311,7 @@ public:
                     {1.0f, 1.0f, 1.0f, 1.0f},
                     rect,
                     0.0f,
+                    0.0f,
                     windowWidth,
                     windowHeight);
     }
@@ -320,7 +320,6 @@ public:
                                 int windowHeight) {
         (void)command; (void)windowWidth; (void)windowHeight;
     }
-};
 };
 
 std::unique_ptr<RenderBackend> createRenderBackend(core::window::Handle window, RenderBackend* shareBackend = nullptr);

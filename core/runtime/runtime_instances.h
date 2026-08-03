@@ -134,7 +134,6 @@ struct ShaderToyInstance {
     std::uint64_t resetKey = 0;
     std::uint64_t reportedErrorHash = 0;
 };
-};
 
 struct InteractionInstance {
     InteractionState state;

@@ -284,39 +284,6 @@ void OpenGLRenderBackend::drawLayerTexture(TextureHandle handle,
     glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertexFloatCount / 7));
 }
 
-void OpenGLRenderBackend::drawLayerTexture(TextureHandle handle,
-                                           const float* vertices,
-                                           std::size_t vertexFloatCount,
-                                           const core::Rect& rect,
-                                           int windowWidth,
-                                           int windowHeight) {
-    const GLuint texture = textureIdFromHandle(handle);
-    if (texture == 0 || vertices == nullptr || vertexFloatCount < 42 ||
-        windowWidth <= 0 || windowHeight <= 0) {
-        return;
-    }
-    if (!ensureImageResources()) {
-        return;
-    }
-
-    setPremultipliedAlphaBlend();
-
-    useProgram(imageShaderProgram_);
-    glUniform2f(imageWindowSizeLocation_, static_cast<float>(std::max(1, windowWidth)),
-                static_cast<float>(std::max(1, windowHeight)));
-    glUniform4f(imageTintLocation_, 1.0f, 1.0f, 1.0f, 1.0f);
-    glUniform4f(imageRectLocation_, rect.x, rect.y, rect.width, rect.height);
-    glUniform1f(imageRadiusLocation_, 0.0f);
-    glUniform1i(imageTextureLocation_, 0);
-
-    bindVertexArray(imageVao_);
-    bindArrayBuffer(imageVbo_);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, static_cast<GLsizeiptr>(vertexFloatCount * sizeof(float)), vertices);
-    activeTextureUnit(0);
-    bindTexture2D(texture);
-    glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertexFloatCount / 7));
-}
-
 bool OpenGLRenderBackend::ensureImageResources() {
     if (imageShaderProgram_ != 0 && imageVao_ != 0 && imageVbo_ != 0) {
         return true;

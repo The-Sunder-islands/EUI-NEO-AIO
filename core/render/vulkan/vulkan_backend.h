@@ -68,6 +68,8 @@ public:
     void drawCanvasShape(const CanvasDrawCommand& command,
                          int windowWidth,
                          int windowHeight) override;
+                          int windowWidth,
+                          int windowHeight) override;
 
 private:
     struct TextureResource {
@@ -175,6 +177,7 @@ private:
     bool ensureRoundedRectPipeline();
     bool ensurePolygonPipeline();
     bool ensureCanvasPipeline();
+=======
     bool ensurePolygonEdgeBuffer(std::size_t edgeCount);
     bool ensureBackdropResources(std::uint32_t width, std::uint32_t height);
     bool ensureBackdropDescriptor();
@@ -194,6 +197,7 @@ private:
     void destroyRoundedRectPipeline();
     void destroyPolygonPipeline();
     void destroyCanvasPipeline();
+=======
     void destroyPolygonEdgeBuffer();
     void destroyBackdropResources();
     void destroyBackdropDescriptorPool();
@@ -269,6 +273,7 @@ private:
     VkDescriptorSetLayout canvasDescriptorSetLayout_ = VK_NULL_HANDLE;
     VkPipelineLayout canvasPipelineLayout_ = VK_NULL_HANDLE;
     VkPipeline canvasPipeline_ = VK_NULL_HANDLE;
+=======
 
     VkImage renderCacheImage_ = VK_NULL_HANDLE;
     VkDeviceMemory renderCacheMemory_ = VK_NULL_HANDLE;

@@ -295,7 +295,7 @@ Text 支持：
 
 `.icon(...)` 会自动使用图标字体；图标字体默认来自 `core/render/text.cpp`，也可以通过配置里的 `.iconFont(...)` 按 app 覆盖。找不到内置图标字体资源时会尝试平台 symbol/icon 字体兜底；但 FontAwesome 图标使用 FontAwesome 自己的 codepoint，系统字体不一定有兼容 glyph，发布包仍建议携带默认 `assets/` 或显式配置 `.iconFont(...)`。
 
-底层文本使用 FreeType 渲染 glyph，启用 HarfBuzz 时会进行复杂文本 shaping。`fontFamily("monospace")` 会选择跨平台等宽字体，`fontFamily("Emoji")` 会选择平台 emoji 字体；如果指定字体或内置 assets 字体加载失败，文本栈会继续尝试默认 UI 字体和系统字体兜底。需要精确光标位置或命中测试时，使用 `core::TextPrimitive::measureTextMetrics(...)` 获取 shaped caret stops；返回的 `byteIndices` 是 UTF-8 byte offset，`caretX` 是对应的逻辑 x，和实际渲染使用同一套 fallback、emoji 缩放和 glyph advance。
+底层文本使用 FreeType 渲染 glyph，并通过字体栈 fallback 选择覆盖字符的字体。`fontFamily("monospace")` 会选择跨平台等宽字体，`fontFamily("Emoji")` 会选择平台 emoji 字体；如果指定字体或内置 assets 字体加载失败，文本栈会继续尝试默认 UI 字体和系统字体兜底。需要精确光标位置或命中测试时，使用 `core::TextPrimitive::measureTextMetrics(...)` 获取 caret stops；返回的 `byteIndices` 是 UTF-8 byte offset，`caretX` 是对应的逻辑 x，和实际渲染使用同一套 fallback、emoji 缩放和 glyph advance。
 
 Text 的 transform 作用在生成后的 glyph 顶点上，适合做滚轮、轻量缩放和旋转动效；默认命中测试仍按未 transform 的布局 frame 计算，需要跟随视觉变换时开启 `.transformedHitTest()`。
 
@@ -474,6 +474,47 @@ Frame 动画需要显式 `.animate(eui::AnimProperty::Frame)`。窗口大小变�
 
 容器 `Row` / `Column` / `Stack` / `Flow` 也支持 `opacity` 和 transform。Runtime 会把容器的 `translate`、`scale`、`rotate`、`rotateX`、`rotateY`、`translateZ`、`perspective`、`transformOrigin` 组合成投影矩阵并继承到子树，因此弹窗、下拉、菜单、卡片翻转和透视动画会作用到内部 Rect / Polygon / Text / Image / Svg。布局占位仍由未 transform 的逻辑 frame 决定。
 
+### 布局 Frame 动画限制
+
+`Frame` 动画只作用于可见叶子节点：`Rect`、`Text`、`Image`、`Svg` 和 `Polygon`。`Row`、`Column`、`Stack`、`Flow` 是布局容器，它们的逻辑 frame 改变会立即重新测量子树，不会自身执行长宽插值。
+
+当任意祖先容器的目标 frame 改变时，Runtime 会让该子树的叶子 frame 同步到新的布局结果，避免插值期间出现错误的流式排版、命中区域、裁剪或滚动范围。因此，下面的写法不会得到预期的平滑展开：
+
+```cpp
+ui.stack("card")
+    .size(width, expanded ? 238.0f : 148.0f)
+    .content([&] {
+        ui.rect("card.background")
+            .fill()
+            .transition(0.3f)
+            .animate(eui::AnimProperty::Frame)
+            .build();
+    })
+    .build();
+```
+
+需要平滑展开的面板、卡片或折叠内容，应保持外层布局容器的逻辑尺寸稳定，让可见叶子节点在其中独立插值：
+
+```cpp
+constexpr float maxHeight = 238.0f;
+const float height = expanded ? maxHeight : 148.0f;
+const float top = (maxHeight - height) * 0.5f;
+
+ui.stack("card")
+    .size(width, maxHeight) // 不随状态变化，避免祖先布局 snap
+    .content([&] {
+        ui.rect("card.background")
+            .position(0.0f, top)
+            .size(width, height)
+            .transition(0.3f, eui::Ease::OutCubic)
+            .animate(eui::AnimProperty::Frame)
+            .build();
+    })
+    .build();
+```
+
+完整、可运行的参考实现见 `examples/animated_card.cpp`。它同时展示了 frame、transform、颜色、圆角、边框、阴影和透明度动画。
+
 当前可动画属性：
 
 - Rect：frame、color、opacity、radius、border、shadow、blur、transform。
@@ -502,7 +543,7 @@ Frame 动画需要显式 `.animate(eui::AnimProperty::Frame)`。窗口大小变�
 - `components::segmented(ui, id)`：分段选择，点击回调 next index。
 - `components::tabs(ui, id)`：标签页切换，点击回调 next index。
 - `components::scroll(ui, id)`：滚动条，绑定 Runtime scroll state 后由 Runtime 更新 thumb transform。
-- `components::scrollView(ui, id)`：普通滚动区域，适合内容量可完整 compose 的页面；滚动内容通过 Runtime transform 移动，滚轮和滚动条拖动不触发整页 compose。
+- `components::scrollView(ui, id)`：普通滚动区域，适合内容量可完整 compose 的页面；滚轮由 Runtime 按时间推进惯性，滚动内容通过 Runtime transform 移动，滚轮和滚动条拖动不触发整页 compose。
 - `components::virtualList(ui, id)`：固定行高虚拟列表，适合超长纵向列表；组件按 `offset + viewport + overscan` 只 compose 可见 slot，行回调收到真实 index、宽度和行高。回调 id 是可见 slot id，不是业务行 id；需要保存行级业务状态时，用真实 index 或业务 key 存在页面状态里。
 - `components::dropdown(ui, id)`：下拉选择，页面传 selected/open，组件回调 next index 和 open 状态。
 - `components::datePicker(ui, id)`：dialog 式日期选择器，页面传 date/open，面板内调整是 draft，点击 `Done` 后才回调 next date。
@@ -542,7 +583,7 @@ components::button(ui, "save")
 - 每帧回收已经不在 DSL 树里的 primitive、交互状态和 dirty key 实例。
 - 统一处理 pointer event、hit-test、press capture、click。
 - disabled 父节点会禁用整棵子树的交互、焦点、文本输入和 IME 光标状态。
-- 维护 scroll state；普通滚动的滚轮和滚动条拖动只更新滚动 transform 和 dirty rect，不触发整页 compose。少数需要滚动时重组可见内容的组件可以显式使用 `.composeOnScrollOffsetChange()`，例如 `components::virtualList`。
+- 维护 scroll state；滚轮输入在 Runtime 内累加速度并按时间衰减，滚动条拖动则直接更新 offset。两种路径都只更新滚动 transform 和 dirty rect，不触发整页 compose。少数需要滚动时重组可见内容的组件可以显式使用 `.composeOnScrollOffsetChange()`，例如 `components::virtualList`。
 - interactive blocker 会阻断下层 hover / click / focus；弹层、侧边栏、遮罩和面板背景应声明透明或实体 hit rect 来吃掉事件。
 - 维护 hover / press 动画状态。
 - 推进 transition 动画。

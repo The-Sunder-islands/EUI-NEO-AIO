@@ -3,38 +3,176 @@ set_property(CACHE EUI_DEPS_MODE PROPERTY STRINGS bundled auto fetch)
 if(NOT EUI_DEPS_MODE MATCHES "^(bundled|auto|fetch)$")
     message(FATAL_ERROR "EUI_DEPS_MODE must be one of: bundled, auto, fetch")
 endif()
-option(EUI_ENABLE_HARFBUZZ "Enable HarfBuzz shaping for complex text" ON)
 option(EUI_ENABLE_MARKDOWN "Enable MD4C Markdown parsing support" ON)
 
 set(EUI_THIRD_PARTY_DIR "${CMAKE_CURRENT_LIST_DIR}")
-list(PREPEND CMAKE_MODULE_PATH "${EUI_THIRD_PARTY_DIR}")
-
 include(FetchContent)
-include("${CMAKE_CURRENT_LIST_DIR}/EuiThirdParty.cmake")
 
-set(EUI_OWNS_GLFW_TARGET OFF)
-set(EUI_OWNS_GLAD_TARGET OFF)
+file(GLOB _eui_third_party_entries
+    CONFIGURE_DEPENDS
+    LIST_DIRECTORIES TRUE
+    "${EUI_THIRD_PARTY_DIR}/*"
+)
+set(EUI_THIRD_PARTY_SOURCE_DIRS "")
+foreach(_eui_candidate IN LISTS _eui_third_party_entries)
+    if(IS_DIRECTORY "${_eui_candidate}")
+        list(APPEND EUI_THIRD_PARTY_SOURCE_DIRS "${_eui_candidate}")
+    endif()
+endforeach()
+unset(_eui_candidate)
+unset(_eui_third_party_entries)
 
-function(eui_use_bundled_dependency out_var dep_name source_dir marker_file)
+function(eui_find_bundled_dependency out_var dep_name)
     if(EUI_DEPS_MODE STREQUAL "fetch")
-        set(${out_var} FALSE PARENT_SCOPE)
+        set(${out_var} "" PARENT_SCOPE)
         return()
     endif()
 
-    if(EXISTS "${source_dir}/${marker_file}")
-        set(${out_var} TRUE PARENT_SCOPE)
+    set(matches "")
+    foreach(candidate IN LISTS EUI_THIRD_PARTY_SOURCE_DIRS)
+        set(is_match TRUE)
+        foreach(marker IN LISTS ARGN)
+            if(NOT EXISTS "${candidate}/${marker}")
+                set(is_match FALSE)
+                break()
+            endif()
+        endforeach()
+        if(is_match)
+            list(APPEND matches "${candidate}")
+        endif()
+    endforeach()
+
+    list(LENGTH matches match_count)
+    if(match_count GREATER 1)
+        list(JOIN matches "', '" match_list)
+        message(FATAL_ERROR
+            "Multiple bundled source directories match '${dep_name}': '${match_list}'. "
+            "Keep only one matching source directory under ${EUI_THIRD_PARTY_DIR}."
+        )
+    endif()
+
+    if(match_count EQUAL 1)
+        list(GET matches 0 source_dir)
+        message(STATUS "Using bundled ${dep_name} source: ${source_dir}")
+        set(${out_var} "${source_dir}" PARENT_SCOPE)
         return()
     endif()
 
     if(EUI_DEPS_MODE STREQUAL "bundled")
+        list(JOIN ARGN "', '" marker_list)
         message(FATAL_ERROR
-            "Bundled dependency '${dep_name}' is missing at ${source_dir}. "
-            "Restore the vendored source, or configure with -DEUI_DEPS_MODE=auto/fetch to allow network fetches."
+            "Bundled dependency '${dep_name}' was not found under ${EUI_THIRD_PARTY_DIR}. "
+            "Add one source directory containing '${marker_list}', or configure with "
+            "-DEUI_DEPS_MODE=auto/fetch to allow a network fetch."
         )
     endif()
 
-    set(${out_var} FALSE PARENT_SCOPE)
+    set(${out_var} "" PARENT_SCOPE)
 endfunction()
+
+function(eui_prepare_pkg_config_stub out_var)
+    if(WIN32)
+        set(stub_path "${CMAKE_CURRENT_BINARY_DIR}/eui-pkg-config-stub.bat")
+        file(WRITE "${stub_path}" "@echo 0.0.0\r\n@if \"%1\"==\"--version\" exit /b 0\r\n@exit /b 1\r\n")
+    else()
+        set(stub_path "${CMAKE_CURRENT_BINARY_DIR}/eui-pkg-config-stub.sh")
+        file(WRITE "${stub_path}" "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 0.0.0; exit 0; fi\nexit 1\n")
+        file(CHMOD "${stub_path}"
+            PERMISSIONS
+                OWNER_READ OWNER_WRITE OWNER_EXECUTE
+                GROUP_READ GROUP_EXECUTE
+                WORLD_READ WORLD_EXECUTE
+        )
+    endif()
+
+    set(${out_var} "${stub_path}" PARENT_SCOPE)
+endfunction()
+
+function(eui_set_third_party_option name value description)
+    set(${name} ${value} CACHE BOOL "${description}" FORCE)
+endfunction()
+
+macro(eui_begin_quiet_third_party_config)
+    set(EUI_PREV_CMAKE_DISABLE_FIND_PACKAGE_PkgConfig "${CMAKE_DISABLE_FIND_PACKAGE_PkgConfig}")
+    set(EUI_PREV_CMAKE_MESSAGE_LOG_LEVEL "${CMAKE_MESSAGE_LOG_LEVEL}")
+    set(EUI_PREV_PKG_CONFIG_EXECUTABLE "${PKG_CONFIG_EXECUTABLE}")
+    set(EUI_PREV_PkgConfig_FIND_QUIETLY "${PkgConfig_FIND_QUIETLY}")
+    eui_prepare_pkg_config_stub(EUI_PKG_CONFIG_STUB)
+
+    if(COMMAND cmake_diagnostic)
+        cmake_diagnostic(GET CMD_DEPRECATED EUI_PREV_CMAKE_CMD_DEPRECATED_DIAGNOSTIC)
+        cmake_diagnostic(SET CMD_DEPRECATED IGNORE RECURSE)
+    else()
+        set(EUI_PREV_CMAKE_WARN_DEPRECATED "${CMAKE_WARN_DEPRECATED}")
+        set(CMAKE_WARN_DEPRECATED OFF CACHE BOOL "Suppress bundled third-party CMake deprecation warnings" FORCE)
+    endif()
+    set(CMAKE_DISABLE_FIND_PACKAGE_PkgConfig TRUE CACHE BOOL "Suppress bundled third-party pkg-config probes" FORCE)
+    set(CMAKE_MESSAGE_LOG_LEVEL WARNING)
+    set(PKG_CONFIG_EXECUTABLE "${EUI_PKG_CONFIG_STUB}" CACHE FILEPATH "Bundled third-party pkg-config stub" FORCE)
+    set(PkgConfig_FIND_QUIETLY TRUE)
+endmacro()
+
+macro(eui_end_quiet_third_party_config)
+    if(COMMAND cmake_diagnostic)
+        cmake_diagnostic(SET CMD_DEPRECATED "${EUI_PREV_CMAKE_CMD_DEPRECATED_DIAGNOSTIC}" RECURSE)
+    else()
+        set(CMAKE_WARN_DEPRECATED "${EUI_PREV_CMAKE_WARN_DEPRECATED}" CACHE BOOL "Suppress deprecated functionality warnings" FORCE)
+    endif()
+    set(CMAKE_DISABLE_FIND_PACKAGE_PkgConfig "${EUI_PREV_CMAKE_DISABLE_FIND_PACKAGE_PkgConfig}" CACHE BOOL "Disable find_package(PkgConfig)" FORCE)
+    set(CMAKE_MESSAGE_LOG_LEVEL "${EUI_PREV_CMAKE_MESSAGE_LOG_LEVEL}")
+    set(PKG_CONFIG_EXECUTABLE "${EUI_PREV_PKG_CONFIG_EXECUTABLE}" CACHE FILEPATH "pkg-config executable" FORCE)
+    set(PkgConfig_FIND_QUIETLY "${EUI_PREV_PkgConfig_FIND_QUIETLY}")
+    unset(EUI_PREV_CMAKE_CMD_DEPRECATED_DIAGNOSTIC)
+    unset(EUI_PREV_CMAKE_WARN_DEPRECATED)
+endmacro()
+
+macro(eui_begin_static_third_party_config)
+    set(EUI_PREV_BUILD_SHARED_LIBS "${BUILD_SHARED_LIBS}")
+    if(EUI_BUILD_SHARED)
+        set(BUILD_SHARED_LIBS ON CACHE BOOL "Build bundled third-party libraries as shared libraries" FORCE)
+    else()
+        set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build bundled third-party libraries as static libraries" FORCE)
+    endif()
+endmacro()
+
+macro(eui_end_static_third_party_config)
+    set(BUILD_SHARED_LIBS "${EUI_PREV_BUILD_SHARED_LIBS}" CACHE BOOL "Build shared libraries" FORCE)
+endmacro()
+
+set(EUI_FIND_MODULE_DIR "${CMAKE_CURRENT_BINARY_DIR}/_deps/eui-find-modules")
+file(MAKE_DIRECTORY "${EUI_FIND_MODULE_DIR}")
+file(WRITE "${EUI_FIND_MODULE_DIR}/FindZLIB.cmake" [=[
+if(TARGET ZLIB::ZLIB AND DEFINED EUI_ZLIB_DIR AND EXISTS "${EUI_ZLIB_DIR}/zlib.h")
+    set(ZLIB_FOUND TRUE)
+    set(ZLIB_INCLUDE_DIRS "${EUI_ZLIB_DIR}")
+    set(ZLIB_LIBRARIES ZLIB::ZLIB)
+    set(ZLIB_LIBRARY ZLIB::ZLIB)
+    set(ZLIB_INCLUDE_DIR "${EUI_ZLIB_DIR}")
+
+    file(STRINGS "${EUI_ZLIB_DIR}/zlib.h" _eui_zlib_version_line REGEX "^#define ZLIB_VERSION ")
+    string(REGEX REPLACE "^#define ZLIB_VERSION \"([^\"]+)\".*$" "\\1" ZLIB_VERSION_STRING "${_eui_zlib_version_line}")
+    set(ZLIB_VERSION "${ZLIB_VERSION_STRING}")
+else()
+    include("${CMAKE_ROOT}/Modules/FindZLIB.cmake")
+endif()
+]=])
+file(WRITE "${EUI_FIND_MODULE_DIR}/FindPNG.cmake" [=[
+if(TARGET PNG::PNG)
+    set(PNG_FOUND TRUE)
+    set(PNG_LIBRARIES PNG::PNG)
+    get_target_property(PNG_INCLUDE_DIRS PNG::PNG INTERFACE_INCLUDE_DIRECTORIES)
+    if(NOT PNG_INCLUDE_DIRS)
+        set(PNG_INCLUDE_DIRS "")
+    endif()
+    set(PNG_DEFINITIONS "")
+else()
+    include("${CMAKE_ROOT}/Modules/FindPNG.cmake")
+endif()
+]=])
+list(PREPEND CMAKE_MODULE_PATH "${EUI_FIND_MODULE_DIR}")
+
+set(EUI_OWNS_GLFW_TARGET OFF)
+set(EUI_OWNS_GLAD_TARGET OFF)
 
 function(eui_fetch_dependency source_dir_var content_name source_url)
     FetchContent_Declare(
@@ -83,16 +221,16 @@ if(EUI_WINDOW_BACKEND STREQUAL "glfw")
         endif()
 
         if(NOT TARGET glfw)
-            eui_use_bundled_dependency(
-                EUI_USE_BUNDLED_GLFW
+            eui_find_bundled_dependency(
+                EUI_GLFW_DIR
                 "GLFW"
-                "${EUI_THIRD_PARTY_DIR}/glfw"
+                "include/GLFW/glfw3.h"
+                "src/context.c"
                 "CMakeLists.txt"
             )
 
             eui_begin_static_third_party_config()
-            if(EUI_USE_BUNDLED_GLFW)
-                set(EUI_GLFW_DIR "${EUI_THIRD_PARTY_DIR}/glfw")
+            if(EUI_GLFW_DIR)
                 add_subdirectory("${EUI_GLFW_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/_deps/glfw-bundled-build" EXCLUDE_FROM_ALL)
             else()
                 FetchContent_Declare(
@@ -116,6 +254,15 @@ if(EUI_WINDOW_BACKEND STREQUAL "glfw")
         message(FATAL_ERROR
             "EUI_WINDOW_BACKEND=glfw requires a CMake target named 'glfw'. "
             "Provide one before adding EUI-NEO, install glfw3, or allow EUI-NEO to use bundled/fetched GLFW."
+        )
+    endif()
+
+    get_target_property(EUI_GLFW_TARGET_TYPE glfw TYPE)
+    if(EUI_BUILD_SHARED AND EUI_GLFW_TARGET_TYPE STREQUAL "STATIC_LIBRARY")
+        message(FATAL_ERROR
+            "EUI_BUILD_SHARED requires a shared GLFW target. A static GLFW library would give "
+            "eui_neo and its applications separate GLFW global state. Provide shared GLFW, or "
+            "let EUI-NEO build its bundled/fetched GLFW dependency."
         )
     endif()
 endif()
@@ -169,15 +316,15 @@ if(EUI_RESOLVED_RENDER_BACKEND STREQUAL "opengl")
         endif()
 
         if(NOT TARGET glad)
-            eui_use_bundled_dependency(
-                EUI_USE_BUNDLED_GLAD
+            eui_find_bundled_dependency(
+                EUI_GLAD_DIR
                 "glad"
-                "${EUI_THIRD_PARTY_DIR}/glad"
                 "src/glad.c"
+                "include/glad/glad.h"
             )
 
-            if(EUI_USE_BUNDLED_GLAD)
-                set(glad_SOURCE_DIR "${EUI_THIRD_PARTY_DIR}/glad")
+            if(EUI_GLAD_DIR)
+                set(glad_SOURCE_DIR "${EUI_GLAD_DIR}")
             else()
                 FetchContent_Declare(
                     glad
@@ -220,16 +367,13 @@ if(EUI_RESOLVED_RENDER_BACKEND STREQUAL "opengl")
     endif()
 endif()
 
-eui_use_bundled_dependency(
-    EUI_USE_BUNDLED_TRAY
+eui_find_bundled_dependency(
+    TRAY_INCLUDE_DIR
     "tray"
-    "${EUI_THIRD_PARTY_DIR}/tray"
     "tray.h"
 )
 
-if(EUI_USE_BUNDLED_TRAY)
-    set(TRAY_INCLUDE_DIR "${EUI_THIRD_PARTY_DIR}/tray")
-else()
+if(NOT TRAY_INCLUDE_DIR)
     FetchContent_Declare(
         tray
         URL https://github.com/zserge/tray/archive/8dd1358b92562faf7c032cf5362fa97cbc7e13e9.zip
@@ -240,42 +384,37 @@ else()
     set(TRAY_INCLUDE_DIR "${tray_SOURCE_DIR}")
 endif()
 
-eui_use_bundled_dependency(
-    EUI_USE_BUNDLED_FREETYPE
+eui_find_bundled_dependency(
+    EUI_FREETYPE_DIR
     "FreeType"
-    "${EUI_THIRD_PARTY_DIR}/freetype"
+    "include/freetype/freetype.h"
+    "src/base/ftsystem.c"
     "CMakeLists.txt"
 )
 
-eui_use_bundled_dependency(
-    EUI_USE_BUNDLED_ZLIB
+eui_find_bundled_dependency(
+    EUI_ZLIB_DIR
     "zlib"
-    "${EUI_THIRD_PARTY_DIR}/zlib-1.3.1"
     "zlib.h"
+    "zconf.h"
+    "inflate.c"
 )
 
-eui_use_bundled_dependency(
-    EUI_USE_BUNDLED_LIBPNG
+eui_find_bundled_dependency(
+    EUI_LIBPNG_DIR
     "libpng"
-    "${EUI_THIRD_PARTY_DIR}/libpng-1.6.43"
     "png.h"
+    "pngconf.h"
+    "png.c"
+    "CMakeLists.txt"
 )
-
-if(EUI_ENABLE_HARFBUZZ)
-    eui_use_bundled_dependency(
-        EUI_USE_BUNDLED_HARFBUZZ
-        "HarfBuzz"
-        "${EUI_THIRD_PARTY_DIR}/harfbuzz"
-        "CMakeLists.txt"
-    )
-endif()
 
 if(EUI_ENABLE_MARKDOWN)
-    eui_use_bundled_dependency(
-        EUI_USE_BUNDLED_MD4C
+    eui_find_bundled_dependency(
+        EUI_MD4C_DIR
         "MD4C"
-        "${EUI_THIRD_PARTY_DIR}/md4c"
         "src/md4c.c"
+        "src/md4c.h"
     )
 endif()
 
@@ -291,9 +430,7 @@ if(EUI_RESOLVED_RENDER_BACKEND STREQUAL "opengl")
 endif()
 find_package(Threads REQUIRED)
 
-if(EUI_USE_BUNDLED_ZLIB)
-    set(EUI_ZLIB_DIR "${EUI_THIRD_PARTY_DIR}/zlib-1.3.1")
-else()
+if(NOT EUI_ZLIB_DIR)
     eui_fetch_dependency(
         EUI_ZLIB_DIR
         eui_zlib
@@ -320,7 +457,7 @@ add_library(eui_zlib STATIC
 )
 target_include_directories(eui_zlib PUBLIC
     $<BUILD_INTERFACE:${EUI_ZLIB_DIR}>
-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/eui-neo/3rd/zlib-1.3.1>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/eui-neo/3rd/zlib>
 )
 if(UNIX)
     target_compile_definitions(eui_zlib PRIVATE HAVE_UNISTD_H)
@@ -330,9 +467,7 @@ if(NOT TARGET ZLIB::ZLIB)
     add_library(ZLIB::ZLIB ALIAS eui_zlib)
 endif()
 
-if(EUI_USE_BUNDLED_LIBPNG)
-    set(EUI_LIBPNG_DIR "${EUI_THIRD_PARTY_DIR}/libpng-1.6.43")
-else()
+if(NOT EUI_LIBPNG_DIR)
     eui_fetch_dependency(
         EUI_LIBPNG_DIR
         eui_libpng
@@ -365,9 +500,7 @@ eui_set_third_party_option(FT_DISABLE_PNG OFF "Disable png support in bundled Fr
 eui_set_third_party_option(FT_REQUIRE_PNG ON "Require png support in bundled FreeType")
 eui_set_third_party_option(FT_DISABLE_HARFBUZZ ON "Disable HarfBuzz support in bundled FreeType")
 eui_set_third_party_option(FT_DISABLE_BROTLI ON "Disable brotli support in bundled FreeType")
-if(EUI_USE_BUNDLED_FREETYPE)
-    set(EUI_FREETYPE_DIR "${EUI_THIRD_PARTY_DIR}/freetype")
-else()
+if(NOT EUI_FREETYPE_DIR)
     eui_fetch_dependency(
         EUI_FREETYPE_DIR
         eui_freetype
@@ -394,45 +527,8 @@ else()
     find_package(CURL QUIET)
 endif()
 
-if(EUI_ENABLE_HARFBUZZ)
-    if(EUI_USE_BUNDLED_HARFBUZZ)
-        set(EUI_HARFBUZZ_DIR "${EUI_THIRD_PARTY_DIR}/harfbuzz")
-    else()
-        eui_fetch_dependency(
-            EUI_HARFBUZZ_DIR
-            eui_harfbuzz
-            "https://github.com/harfbuzz/harfbuzz/archive/refs/tags/8.5.0.zip"
-        )
-    endif()
-
-    eui_set_third_party_option(HB_HAVE_CAIRO OFF "Disable Cairo support in bundled HarfBuzz")
-    eui_set_third_party_option(HB_HAVE_GRAPHITE2 OFF "Disable Graphite2 support in bundled HarfBuzz")
-    eui_set_third_party_option(HB_HAVE_GLIB OFF "Disable GLib support in bundled HarfBuzz")
-    eui_set_third_party_option(HB_HAVE_GOBJECT OFF "Disable GObject support in bundled HarfBuzz")
-    eui_set_third_party_option(HB_HAVE_ICU OFF "Disable ICU support in bundled HarfBuzz")
-    eui_set_third_party_option(HB_HAVE_INTROSPECTION OFF "Disable introspection support in bundled HarfBuzz")
-    eui_set_third_party_option(HB_BUILD_UTILS OFF "Disable HarfBuzz utility tools")
-    eui_set_third_party_option(HB_BUILD_SUBSET OFF "Disable HarfBuzz subset library")
-    eui_begin_quiet_third_party_config()
-    add_subdirectory("${EUI_HARFBUZZ_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/_deps/harfbuzz-bundled-build" EXCLUDE_FROM_ALL)
-    eui_end_quiet_third_party_config()
-    if(TARGET harfbuzz AND NOT TARGET harfbuzz::harfbuzz)
-        add_library(harfbuzz::harfbuzz ALIAS harfbuzz)
-    endif()
-    if(TARGET harfbuzz)
-        eui_silence_third_party_warnings(harfbuzz)
-    endif()
-    if(MSVC AND TARGET harfbuzz)
-        target_compile_options(harfbuzz PRIVATE /utf-8)
-    endif()
-    set(CMAKE_CXX_STANDARD 17)
-    set(CMAKE_CXX_STANDARD_REQUIRED TRUE)
-endif()
-
 if(EUI_ENABLE_MARKDOWN)
-    if(EUI_USE_BUNDLED_MD4C)
-        set(EUI_MD4C_DIR "${EUI_THIRD_PARTY_DIR}/md4c")
-    else()
+    if(NOT EUI_MD4C_DIR)
         eui_fetch_dependency(
             EUI_MD4C_DIR
             eui_md4c_source

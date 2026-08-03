@@ -1,31 +1,5 @@
 # EUI-NEO
 
-> 🚀 **EUI-NEO AIO** — 基于 [Android Port](https://github.com/tomlinyuan/EUI-NEO-Android) 的增强 fork。
-> 将基础版本从 **v3.7 升级至 v4.1**，同步了上游更多的改进。
->
-> **新增基础组件：**
-> - **Canvas 2D 绘制基元** — `fillCircle` / `strokeCircle` / `drawLine` 等矢量绘制 API，基于 Vulkan 后端。
->
-> **侧重点差异：**
-> - **后端支持** — 因为移动端的 OpenGL ES 存在难以定位的bug，且不同设备表现存在明显差异，为确保跨平台一致性，本仓库将更多侧重 Vulkan 后端。
->
-> 本仓库同时维护桌面端（Windows / macOS / Linux）与 Android 端构建。
->
-> 诚挚感谢 [上游 EUI-NEO](https://github.com/sudoevolve/EUI-NEO) 作者 [sudoevolve](https://github.com/sudoevolve) 的精美框架，
-> 以及 [Android Port](https://github.com/tomlinyuan/EUI-NEO-Android) 作者 [tomlinyuan](https://github.com/tomlinyuan) 奠定的移动端基础。
->
-> _This fork upgrades the base version from v3.7 to v4.1, adds Canvas 2D primitives (fillCircle / strokeCircle / drawLine, etc.), and focuses more on Vulkan backend for cross-platform consistency. Thanks to the upstream and Android port authors._
-
-> 🤖 **Android Port** — 这是一个为 EUI-NEO 添加 Android 后端的 fork。
-> 完整移动端使用说明、移植细节、组件示例 → **[android/README.md](android/README.md)**
->
-> Android 全部新代码在 `android/` 目录，上游 `core/` 与 `components/` 仅有 6 处小改（详见 Android README）。
-> 下方为上游桌面端（Windows / macOS / Linux）原说明，保留致谢上游作者。
->
-> _This fork adds Android support. See [android/README.md](android/README.md) for the mobile port docs._
-
----
-
 <p align="center">
   <img src="assets/icon.svg" width="104" alt="EUI icon">
 </p>
@@ -67,7 +41,7 @@ Requirements:
 - Vulkan SDK is optional. Use a `build-vk` directory only when you want the Vulkan renderer.
 - Platform OpenGL/windowing development files. Linux builds also need X11 and libcurl development packages.
 
-Build-time sources for GLFW, glad, tray, FreeType, HarfBuzz, libpng, and zlib are vendored under `3rd/`. The default dependency mode is `auto`: CMake uses existing parent targets for `glfw` / `glad` first, then package targets, then the local `3rd/` sources or pinned fetch fallback. Use `-DEUI_DEPS_MODE=bundled` for strict offline builds, or `-DEUI_DEPS_MODE=fetch` to force online dependency fetches. HarfBuzz shaping is enabled by default and can be disabled with `-DEUI_ENABLE_HARFBUZZ=OFF`.
+Build-time sources for GLFW, glad, tray, FreeType, libpng, and zlib are vendored under `3rd/`. Supported source trees are discovered by marker files rather than directory names or version suffixes, so an upstream source directory can be placed directly under `3rd/` without editing EUI-NEO's CMake files. The default dependency mode is `auto`: CMake uses existing parent targets for `glfw` / `glad` first, then package targets, then the local `3rd/` sources or pinned fetch fallback. Use `-DEUI_DEPS_MODE=bundled` for strict offline builds, or `-DEUI_DEPS_MODE=fetch` to force online dependency fetches.
 
 Bundled and fetched dependencies are built for static linking by default, including GLFW. Release packages therefore do not need to ship a GLFW DLL / dylib / so. SDL2 may still be dynamic when you choose a system SDL2 package. The `eui_neo` target itself is static by default; configure with `-DEUI_BUILD_SHARED=ON` when you want to build and install it as a shared library.
 

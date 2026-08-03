@@ -253,11 +253,17 @@ inline void Runtime::setFocusedId(const std::string& id) {
 }
 
 inline void Runtime::updateScroll(const ScrollEvent& event, const std::string& targetId) {
-    if (targetId.empty()) {
-        return;
+    const Element* element = targetId.empty() ? nullptr : ui_.find(targetId);
+    const std::string activeScrollStateId = element != nullptr && !element->disabled
+        ? element->scrollStateId
+        : std::string{};
+    for (auto& entry : scrollStates_) {
+        if (entry.first != activeScrollStateId) {
+            entry.second.velocity = 0.0f;
+        }
     }
 
-    if (const Element* element = ui_.find(targetId)) {
+    if (element != nullptr) {
         if (!element->scrollStateId.empty() && !element->disabled) {
             applyRuntimeScroll(*element, -static_cast<float>(event.y) * scrollStepFor(*element));
             return;
@@ -305,13 +311,18 @@ inline void Runtime::updateImeCursorRect(core::window::Handle window, float dpiS
         return;
     }
 
-    const Rect logicalRect{
-        element->frame.x + element->imeRect.x,
-        element->frame.y + element->imeRect.y,
-        element->imeRect.width,
-        element->imeRect.height
-    };
-    const Rect pixelRect = toPixelRect(logicalRect, dpiScale);
+    if (!focusedElementRenderTransformValid_) {
+        imeCursorRectValid_ = false;
+        return;
+    }
+
+    const Rect elementBounds = toPixelRect(element->frame, dpiScale);
+    const TransformMatrix transform = hitMatrixForElement(
+        *element,
+        dpiScale,
+        elementBounds,
+        focusedElementRenderTransform_);
+    const Rect pixelRect = imeCursorPixelRect(*element, dpiScale, transform);
     if (imeCursorRectValid_ &&
         imeCursorWindow_ == window &&
         closeEnough(imeCursorRect_, pixelRect)) {

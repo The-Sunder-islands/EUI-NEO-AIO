@@ -22,7 +22,6 @@ include_directories(
     ${EUI_ROOT}/include
     ${EUI_ROOT}/3rd
     ${EUI_ROOT}/3rd/freetype/include
-    ${EUI_ROOT}/3rd/harfbuzz/src
     ${EUI_ROOT}/3rd/libpng-1.6.43
     ${EUI_ROOT}/3rd/zlib-1.3.1
 )

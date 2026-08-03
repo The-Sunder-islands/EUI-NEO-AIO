@@ -686,11 +686,39 @@ inline void Runtime::applyRuntimeScroll(const Element& element, float delta) {
     if (element.scrollStateId.empty()) {
         return;
     }
-    const auto state = scrollStates_.find(element.scrollStateId);
+    auto state = scrollStates_.find(element.scrollStateId);
     if (state == scrollStates_.end()) {
         return;
     }
-    setScrollOffset(element.scrollStateId, state->second.offset + delta);
+    runtime::ScrollStateInstance& instance = state->second;
+    if (instance.maxOffset <= 0.0f ||
+        (instance.offset <= 0.0f && delta < 0.0f) ||
+        (instance.offset >= instance.maxOffset && delta > 0.0f)) {
+        instance.velocity = 0.0f;
+        return;
+    }
+
+    instance.velocity = addScrollImpulse(instance.velocity, delta);
+    if (scrollMotionActive(instance.velocity)) {
+        animating_ = true;
+        paintRequested_ = true;
+    }
+}
+
+inline void Runtime::updateScrollMotion(float deltaSeconds) {
+    for (auto& entry : scrollStates_) {
+        runtime::ScrollStateInstance& instance = entry.second;
+        const ScrollMotionStep motion = advanceScrollMotion(
+            instance.offset,
+            instance.maxOffset,
+            instance.velocity,
+            deltaSeconds);
+        instance.velocity = motion.velocity;
+        if (!closeEnough(motion.offset, instance.offset)) {
+            setScrollOffset(entry.first, motion.offset);
+        }
+        animating_ = animating_ || motion.active;
+    }
 }
 
 inline void Runtime::beginRuntimeScrollDrag(const Element& element) {
@@ -701,6 +729,7 @@ inline void Runtime::beginRuntimeScrollDrag(const Element& element) {
     if (state == scrollStates_.end()) {
         return;
     }
+    state->second.velocity = 0.0f;
     state->second.dragStartOffset = state->second.offset;
 }
 
@@ -712,6 +741,7 @@ inline void Runtime::updateRuntimeScrollDrag(const Element& element, double drag
     if (state == scrollStates_.end() || state->second.maxOffset <= 0.0f) {
         return;
     }
+    state->second.velocity = 0.0f;
     const float logicalDeltaY = static_cast<float>(dragDeltaY) / std::max(0.001f, dpiScale);
     const float next = state->second.dragStartOffset +
                        logicalDeltaY * (state->second.maxOffset / element.scrollDragTravel);
@@ -772,6 +802,7 @@ inline void Runtime::updateElementTree(
     float dpiScale,
     const std::string& hoverTargetId) {
     runtime::markEntriesUnseen(paintBounds_);
+    focusedElementRenderTransformValid_ = false;
     const RenderTransform identity;
     const std::vector<const Element*>& roots = orderedElements(ui_);
     for (const Element* root : roots) {
@@ -825,20 +856,11 @@ inline runtime::PaintBoundsInstance Runtime::updateElementTree(
 
     const bool childAncestorFrameChanged = ancestorFrameChanged || frameTargetChanged;
     const RenderTransform renderTransform = resolveRenderTransform(element, dpiScale, inheritedTransform);
-    runtime::PaintBoundsInstance bounds;
-    bounds.seen = true;
-    bounds.subtreeAnimating = elementHasActiveAnimation(element);
-    if (renderTransform.opacity > 0.001f &&
-        element.kind != ElementKind::Row &&
-        element.kind != ElementKind::Column &&
-        element.kind != ElementKind::Stack &&
-        element.kind != ElementKind::Flow) {
-        bounds.own = visualDirtyRectForElement(element, dpiScale, inheritedTransform);
-        bounds.subtree = bounds.own;
-        bounds.hasOwn = bounds.own.width > 0.0f && bounds.own.height > 0.0f;
-        bounds.hasSubtree = bounds.hasOwn;
-        bounds.drawCost = bounds.hasOwn ? 1 : 0;
+    if (element.id == focusedId_) {
+        focusedElementRenderTransform_ = renderTransform;
+        focusedElementRenderTransformValid_ = true;
     }
+    runtime::PaintBoundsInstance bounds;
 
     const std::vector<const Element*>& children = orderedElements(element);
     for (const Element* child : children) {

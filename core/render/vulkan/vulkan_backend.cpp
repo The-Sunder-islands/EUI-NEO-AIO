@@ -908,6 +908,7 @@ void VulkanRenderBackend::destroySwapchain() {
     destroyRoundedRectPipeline();
     destroyPolygonPipeline();
     destroyCanvasPipeline();
+=======
     destroyBackdropResources();
     destroyTextPipeline();
     destroyTextResources();

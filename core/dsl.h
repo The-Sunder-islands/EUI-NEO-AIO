@@ -1613,11 +1613,11 @@ private:
                !element.sliderInputSourceId.empty() ||
                !element.sliderFillSourceId.empty() ||
                !element.sliderKnobSourceId.empty() ||
-                !element.dirtyKey.empty() ||
-                element.onCanvasDraw ||
-                (element.kind == ElementKind::Image && !element.imageSource.empty()) ||
-                element.kind == ElementKind::Svg ||
-                element.kind == ElementKind::Canvas;
+               !element.dirtyKey.empty() ||
+               element.onCanvasDraw ||
+               (element.kind == ElementKind::Image && !element.imageSource.empty()) ||
+               element.kind == ElementKind::Svg ||
+               element.kind == ElementKind::Canvas;
     }
 
     static bool elementHasDependentVisuals(const Element& element) {
@@ -1660,11 +1660,11 @@ private:
                !element.sliderInputSourceId.empty() ||
                !element.sliderFillSourceId.empty() ||
                !element.sliderKnobSourceId.empty() ||
-                !element.dirtyKey.empty() ||
-                element.onCanvasDraw ||
-                (element.kind == ElementKind::Image && !element.imageSource.empty()) ||
-                element.kind == ElementKind::Svg ||
-                element.kind == ElementKind::Canvas;
+               !element.dirtyKey.empty() ||
+               element.onCanvasDraw ||
+               (element.kind == ElementKind::Image && !element.imageSource.empty()) ||
+               element.kind == ElementKind::Svg ||
+               element.kind == ElementKind::Canvas;
     }
 
     std::string pageId_;

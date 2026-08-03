@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.14)
-project(EUI-NEO VERSION 0.5.4)
+project(EUI-NEO VERSION 0.5.5)
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
@@ -300,6 +300,7 @@ endif()
 # -----------------------------------------------------------------------------
 
 set(EUI_APP_ASSETS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets")
+set(EUI_SHADERTOY_RUNTIME_ASSET_DIR "assets/shaders/shadertoy")
 
 set(APP_ICON_RESOURCE)
 if(WIN32)
@@ -373,18 +374,18 @@ if(EUI_BUILD_APPS)
         eui_neo_configure_app(${app_name})
         if(app_name STREQUAL "shadertoy")
             set(shadertoy_demo_spirv
-                "${CMAKE_CURRENT_BINARY_DIR}/shaders/shadertoy_demo.frag.spv")
+                "${CMAKE_CURRENT_BINARY_DIR}/${EUI_SHADERTOY_RUNTIME_ASSET_DIR}/demo.frag.spv")
             set(shadertoy_demo_source
                 "${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders/shadertoy/demo.frag")
             set(shadertoy_presets_dir
                 "${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders/shadertoy")
             set(shadertoy_preset_spirv_dir
-                "${CMAKE_CURRENT_BINARY_DIR}/shadertoy-example-presets")
+                "${CMAKE_CURRENT_BINARY_DIR}/${EUI_SHADERTOY_RUNTIME_ASSET_DIR}")
             target_compile_definitions(shadertoy PRIVATE
-                EUI_SHADERTOY_DEMO_SOURCE="${shadertoy_demo_source}"
-                EUI_SHADERTOY_DEMO_SPIRV="${shadertoy_demo_spirv}"
-                EUI_SHADERTOY_PRESETS_DIR="${shadertoy_presets_dir}"
-                EUI_SHADERTOY_PRESET_SPIRV_DIR="${shadertoy_preset_spirv_dir}")
+                EUI_SHADERTOY_DEMO_SOURCE="${EUI_SHADERTOY_RUNTIME_ASSET_DIR}/demo.frag"
+                EUI_SHADERTOY_DEMO_SPIRV="${EUI_SHADERTOY_RUNTIME_ASSET_DIR}/demo.frag.spv"
+                EUI_SHADERTOY_PRESETS_DIR="${EUI_SHADERTOY_RUNTIME_ASSET_DIR}"
+                EUI_SHADERTOY_PRESET_SPIRV_DIR="${EUI_SHADERTOY_RUNTIME_ASSET_DIR}")
             if(EUI_RESOLVED_RENDER_BACKEND STREQUAL "vulkan")
                 eui_compile_shadertoy(shadertoy
                     SOURCE "${shadertoy_demo_source}"
@@ -408,11 +409,11 @@ if(EUI_BUILD_APPS)
         endif()
         if(app_name STREQUAL "gallery")
             set(gallery_shadertoy_spirv
-                "${CMAKE_CURRENT_BINARY_DIR}/shaders/gallery_shadertoy_demo.frag.spv")
+                "${CMAKE_CURRENT_BINARY_DIR}/${EUI_SHADERTOY_RUNTIME_ASSET_DIR}/gallery_demo.frag.spv")
             target_compile_definitions(gallery PRIVATE
-                EUI_GALLERY_SHADERTOY_SOURCE="${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders/shadertoy/demo.frag"
-                EUI_GALLERY_SHADERTOY_NOISE="${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders/shadertoy/blackhole/color_noise.png"
-                EUI_GALLERY_SHADERTOY_SPIRV="${gallery_shadertoy_spirv}")
+                EUI_GALLERY_SHADERTOY_SOURCE="${EUI_SHADERTOY_RUNTIME_ASSET_DIR}/demo.frag"
+                EUI_GALLERY_SHADERTOY_NOISE="${EUI_SHADERTOY_RUNTIME_ASSET_DIR}/blackhole/color_noise.png"
+                EUI_GALLERY_SHADERTOY_SPIRV="${EUI_SHADERTOY_RUNTIME_ASSET_DIR}/gallery_demo.frag.spv")
             if(EUI_RESOLVED_RENDER_BACKEND STREQUAL "vulkan")
                 eui_compile_shadertoy(gallery
                     SOURCE "assets/shaders/shadertoy/demo.frag"
@@ -523,6 +524,16 @@ if(EUI_BUILD_TEST_FIXTURES)
         add_executable(${unit_name} "${unit_source}")
         target_link_libraries(${unit_name} PRIVATE eui::neo)
         eui_apply_compile_options(${unit_name})
+        if(unit_name STREQUAL "shadertoy_packaged_assets")
+            eui_neo_copy_assets(${unit_name})
+            if(TARGET shadertoy)
+                add_dependencies(${unit_name} shadertoy)
+                if(EUI_RESOLVED_RENDER_BACKEND STREQUAL "vulkan")
+                    target_compile_definitions(${unit_name} PRIVATE
+                        EUI_TEST_EXPECT_SHADERTOY_SPIRV=1)
+                endif()
+            endif()
+        endif()
         add_test(NAME ${unit_name} COMMAND ${unit_name})
         set_tests_properties(${unit_name} PROPERTIES LABELS "unit")
     endforeach()

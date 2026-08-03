@@ -18,19 +18,26 @@ enum class Preset { Demo, Blackhole, Fish };
 Preset selectedPreset = Preset::Demo;
 std::string presetError;
 
+std::string resourcePath(const std::string& path) {
+    const std::string resolved = eui::platform::resolveResourcePath(path);
+    return resolved.empty() ? path : resolved;
+}
+
 std::string demoNoisePath() {
 #if defined(EUI_SHADERTOY_PRESETS_DIR)
-    return (std::filesystem::u8path(EUI_SHADERTOY_PRESETS_DIR) /
-            "blackhole" / "color_noise.png").u8string();
+    return resourcePath(
+        (std::filesystem::u8path(EUI_SHADERTOY_PRESETS_DIR) /
+         "blackhole" / "color_noise.png").u8string());
 #else
-    return "assets/shaders/shadertoy/blackhole/color_noise.png";
+    return resourcePath(
+        "assets/shaders/shadertoy/blackhole/color_noise.png");
 #endif
 }
 
 eui::ShaderToyGraph demoGraph() {
     eui::ShaderToyGraph graph;
-    graph.addPass("image", EUI_SHADERTOY_DEMO_SOURCE,
-                  EUI_SHADERTOY_DEMO_SPIRV);
+    graph.addPass("image", resourcePath(EUI_SHADERTOY_DEMO_SOURCE),
+                  resourcePath(EUI_SHADERTOY_DEMO_SPIRV));
     graph.setChannel(
         "image", 0,
         eui::ShaderToyChannel::image(demoNoisePath()));
@@ -51,7 +58,8 @@ eui::ShaderToyGraph loadPreset(Preset preset) {
 #if defined(EUI_SHADERTOY_PRESETS_DIR)
     const std::string name = presetName(preset);
     const std::filesystem::path directory =
-        std::filesystem::u8path(EUI_SHADERTOY_PRESETS_DIR) / name;
+        std::filesystem::u8path(resourcePath(EUI_SHADERTOY_PRESETS_DIR)) /
+        name;
     eui::ShaderToyGraph graph;
     eui::ShaderToyError error;
     if (!eui::loadShaderToyGraphJson(
@@ -61,7 +69,8 @@ eui::ShaderToyGraph loadPreset(Preset preset) {
     }
 #if defined(EUI_RENDER_BACKEND_VULKAN)
     const std::filesystem::path spirvDirectory =
-        std::filesystem::u8path(EUI_SHADERTOY_PRESET_SPIRV_DIR) / name;
+        std::filesystem::u8path(
+            resourcePath(EUI_SHADERTOY_PRESET_SPIRV_DIR)) / name;
     for (std::size_t index = 0; index < graph.passes.size(); ++index) {
         graph.passes[index].spirvPath =
             (spirvDirectory /

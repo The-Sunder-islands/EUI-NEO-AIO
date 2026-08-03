@@ -71,13 +71,19 @@ std::string animationSpeedText() {
     return buffer;
 }
 
+std::string resourcePath(const std::string& path) {
+    const std::string resolved = eui::platform::resolveResourcePath(path);
+    return resolved.empty() ? path : resolved;
+}
+
 eui::ShaderToyGraph galleryShaderToyGraph() {
     eui::ShaderToyGraph graph;
-    graph.addPass("image", EUI_GALLERY_SHADERTOY_SOURCE,
-                  EUI_GALLERY_SHADERTOY_SPIRV);
+    graph.addPass("image", resourcePath(EUI_GALLERY_SHADERTOY_SOURCE),
+                  resourcePath(EUI_GALLERY_SHADERTOY_SPIRV));
     graph.setChannel(
         "image", 0,
-        eui::ShaderToyChannel::image(EUI_GALLERY_SHADERTOY_NOISE));
+        eui::ShaderToyChannel::image(
+            resourcePath(EUI_GALLERY_SHADERTOY_NOISE)));
     return graph;
 }
 

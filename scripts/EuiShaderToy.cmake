@@ -29,7 +29,9 @@ function(eui_compile_shadertoy target_name)
     get_filename_component(source "${EUI_ST_SOURCE}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
     get_filename_component(output "${EUI_ST_OUTPUT}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_BINARY_DIR}")
     get_filename_component(output_dir "${output}" DIRECTORY)
-    set(wrapped "${output}.wrapped.frag")
+    string(MD5 shader_id "${target_name}:${output}")
+    set(wrapped_dir "${CMAKE_CURRENT_BINARY_DIR}/shadertoy-wrapped")
+    set(wrapped "${wrapped_dir}/${shader_id}.frag")
     set(uniform_arguments)
     foreach(uniform IN LISTS EUI_ST_UNIFORMS)
         list(APPEND uniform_arguments --uniform "${uniform}")
@@ -37,6 +39,7 @@ function(eui_compile_shadertoy target_name)
     add_custom_command(
         OUTPUT "${output}"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${output_dir}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${wrapped_dir}"
         COMMAND $<TARGET_FILE:${wrapper_target}>
                 --input "${source}"
                 --output "${wrapped}"
@@ -47,7 +50,6 @@ function(eui_compile_shadertoy target_name)
         COMMENT "Compiling Shadertoy SPIR-V: ${source}"
         VERBATIM
     )
-    string(MD5 shader_id "${target_name}:${output}")
     set(shader_target "${target_name}_shadertoy_${shader_id}")
     add_custom_target(${shader_target} DEPENDS "${output}")
     add_dependencies(${target_name} ${shader_target})

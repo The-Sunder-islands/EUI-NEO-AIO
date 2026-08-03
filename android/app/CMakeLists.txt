@@ -70,7 +70,9 @@ if(EUI_RENDER_BACKEND STREQUAL "vulkan")
         ${EUI_ROOT}/core/render/vulkan/vulkan_backend.cpp
         ${EUI_ROOT}/core/render/vulkan/vulkan_cache.cpp
         ${EUI_ROOT}/core/render/vulkan/vulkan_canvas.cpp
+        ${EUI_ROOT}/core/render/vulkan/vulkan_polygon.cpp
         ${EUI_ROOT}/core/render/vulkan/vulkan_primitives.cpp
+        ${EUI_ROOT}/core/render/vulkan/vulkan_shadertoy.cpp
         ${EUI_ROOT}/core/render/vulkan/vulkan_text.cpp
         ${EUI_ROOT}/core/render/vulkan/vulkan_image.cpp
     )

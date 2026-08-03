@@ -1,11 +1,3 @@
-#ifndef EUI_SHADER_PRELUDE
-#define EUI_SHADER_PRELUDE "#version 330 core\n"
-#endif
-
-#ifdef __ANDROID__
-#include <android/log.h>
-#endif
-
 #include "core/render/opengl/opengl_backend.h"
 
 #include "core/window/window_backend.h"
@@ -40,9 +32,13 @@ struct TextRenderResources {
     TextAtlasTexture color;
 };
 
-TextRenderResources& textResources() {
+std::unordered_map<window::ContextKey, TextRenderResources>& textResourcesByContext() {
     static std::unordered_map<window::ContextKey, TextRenderResources> resourcesByContext;
-    return resourcesByContext[window::currentContextKey()];
+    return resourcesByContext;
+}
+
+TextRenderResources& textResources() {
+    return textResourcesByContext()[window::currentContextKey()];
 }
 
 GLuint compileShader(GLenum type, const char* source) {
@@ -66,13 +62,28 @@ void destroyAtlasTexture(TextAtlasTexture& atlas) {
     atlas = {};
 }
 
+void destroyTextRenderResources(TextRenderResources& resources) {
+    if (resources.vbo != 0) {
+        glDeleteBuffers(1, &resources.vbo);
+    }
+    if (resources.vao != 0) {
+        glDeleteVertexArrays(1, &resources.vao);
+    }
+    if (resources.shaderProgram != 0) {
+        glDeleteProgram(resources.shaderProgram);
+    }
+    destroyAtlasTexture(resources.gray);
+    destroyAtlasTexture(resources.color);
+    resources = {};
+}
+
 bool ensureTextRenderResources(TextRenderResources& resources) {
     if (resources.shaderProgram != 0 && resources.vao != 0 && resources.vbo != 0) {
         return true;
     }
 
     const char* vertexSource =
-        EUI_SHADER_PRELUDE
+        "#version 330 core\n"
         "layout(location = 0) in vec2 aPos;\n"
         "layout(location = 1) in vec2 aUv;\n"
         "layout(location = 2) in float aColored;\n"
@@ -88,7 +99,7 @@ bool ensureTextRenderResources(TextRenderResources& resources) {
         "}\n";
 
     const char* fragmentSource =
-        EUI_SHADER_PRELUDE
+        "#version 330 core\n"
         "in vec2 vUv;\n"
         "in float vColored;\n"
         "out vec4 FragColor;\n"
@@ -110,9 +121,6 @@ bool ensureTextRenderResources(TextRenderResources& resources) {
     GLuint vertexShader = compileShader(GL_VERTEX_SHADER, vertexSource);
     GLuint fragmentShader = compileShader(GL_FRAGMENT_SHADER, fragmentSource);
     if (vertexShader == 0 || fragmentShader == 0) {
-#ifdef __ANDROID__
-        __android_log_print(ANDROID_LOG_ERROR, "EUI_TEXT", "text shader compile failed vs=%d fs=%d", vertexShader, fragmentShader);
-#endif
         if (vertexShader != 0) {
             glDeleteShader(vertexShader);
         }
@@ -193,15 +201,6 @@ bool ensureAtlasTexture(TextAtlasTexture& texture, const TextAtlasPageData& page
     }
     glBindTexture(GL_TEXTURE_2D, 0);
     texture.generation = page.generation;
-#ifdef __ANDROID__
-    __android_log_print(ANDROID_LOG_INFO, "EUI_TEXT", "atlas upload ch=%d tex=%u gen=%llu", page.channels, texture.texture, (unsigned long long)texture.generation);
-#endif
-    const GLenum gle = glGetError();
-    if (gle != GL_NO_ERROR) {
-#ifdef __ANDROID__
-        __android_log_print(ANDROID_LOG_ERROR, "EUI_TEXT", "ensureAtlasTexture err=0x%x", gle);
-#endif
-    }
     return texture.texture != 0;
 }
 
@@ -266,6 +265,17 @@ void OpenGLRenderBackend::drawText(const TextDrawCommand& command, int windowWid
                  command.vertices,
                  GL_DYNAMIC_DRAW);
     glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(command.vertexFloatCount / 5));
+}
+
+void OpenGLRenderBackend::releaseTextResources() {
+    auto& resourcesByContext = textResourcesByContext();
+    const auto current = window::currentContextKey();
+    const auto item = resourcesByContext.find(current);
+    if (item != resourcesByContext.end()) {
+        destroyTextRenderResources(item->second);
+        resourcesByContext.erase(item);
+    }
+    resetStateCache();
 }
 
 } // namespace core::render::opengl

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/render/canvas.h"
 #include "core/render/render_backend.h"
 #include "core/render/render_types.h"
 
@@ -27,15 +28,20 @@ public:
     bool ensureRenderCache(int width, int height) override;
     bool renderCacheWasRecreated() const override;
     void releaseRenderCache() override;
-    void beginRenderCacheFrame(int width, int height) override;
+    void beginRenderCacheFrame(int width,
+                               int height,
+                               const std::vector<core::Rect>& repaintRects = {}) override;
     void endRenderCacheFrame() override;
-    void blitRenderCache(int width, int height) override;
+    void blitRenderCache(int width,
+                         int height,
+                         RenderCacheBlitMode mode = RenderCacheBlitMode::Full,
+                         const std::vector<core::Rect>& dirtyRects = {}) override;
     void clear(const core::Color& color) override;
     void setScissor(bool enabled, const core::Rect& rect, int framebufferHeight) override;
     void prepareBackdropBlur(const core::Rect& bounds, float blur, int windowWidth, int windowHeight) override;
     void drawRoundedRect(const RoundedRectDrawCommand& command, int windowWidth, int windowHeight) override;
+    void drawPolygon(const PolygonDrawCommand& command, int windowWidth, int windowHeight) override;
     void drawText(const TextDrawCommand& command, int windowWidth, int windowHeight) override;
-    void drawCanvasShape(const CanvasDrawCommand& command, int windowWidth, int windowHeight) override;
     TextureHandle createTexture(const unsigned char* pixels, int width, int height) override;
     bool updateTexture(TextureHandle handle, const unsigned char* pixels, int width, int height) override;
     void destroyTexture(TextureHandle handle) override;
@@ -47,6 +53,21 @@ public:
                      float radius,
                      int windowWidth,
                      int windowHeight) override;
+    LayerHandle createLayer(int width, int height) override;
+    bool resizeLayer(LayerHandle layer, int width, int height) override;
+    void destroyLayer(LayerHandle layer) override;
+    bool beginLayerFrame(LayerHandle layer, int width, int height) override;
+    void endLayerFrame() override;
+    TextureHandle layerTexture(LayerHandle layer) override;
+    void drawLayerTexture(TextureHandle handle,
+                          const float* vertices,
+                          std::size_t vertexFloatCount,
+                          const core::Rect& rect,
+                          int windowWidth,
+                          int windowHeight) override;
+    void drawCanvasShape(const CanvasDrawCommand& command,
+                         int windowWidth,
+                         int windowHeight) override;
 
 private:
     struct TextureResource {
@@ -57,10 +78,23 @@ private:
         VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
         VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
         VkImageLayout layout = VK_IMAGE_LAYOUT_UNDEFINED;
+        VkFormat format = VK_FORMAT_UNDEFINED;
         int width = 0;
         int height = 0;
         int channels = 0;
         std::uint64_t generation = 0;
+    };
+
+    struct LayerResource {
+        TextureResource texture;
+        VkFramebuffer framebuffer = VK_NULL_HANDLE;
+        VkExtent2D extent{};
+    };
+
+    enum class RenderTarget {
+        Swapchain,
+        RenderCache,
+        Layer
     };
 
     struct MappedBuffer {
@@ -81,6 +115,12 @@ private:
         std::vector<VkDeviceMemory> pendingMemories;
     };
 
+    struct RenderCacheHistoryEntry {
+        std::uint64_t generation = 0;
+        bool full = false;
+        std::vector<core::Rect> rects;
+    };
+
     bool createInstance();
     bool createSurface();
     bool pickDevice();
@@ -90,15 +130,37 @@ private:
     void destroy();
     void recordClearPass(const core::Color& color);
     void beginLoadPass();
+    bool createTargetImage(TextureResource& texture,
+                           int width,
+                           int height,
+                           VkFormat format,
+                           VkImageUsageFlags usage);
+    bool ensureTextureSampler(TextureResource& texture);
+    bool ensureLayerResource(LayerResource& layer, int width, int height);
+    void destroyLayerResource(LayerResource& layer);
+    void releaseAllLayerFramebuffers();
+    void releaseAllLayerResources();
     void destroyRenderCacheResources();
     void transitionRenderCacheImage(VkImageLayout newLayout);
+    void transitionLayerImage(LayerResource& layer, VkImageLayout newLayout);
     bool ensureRenderCacheResolvePipeline();
     bool ensureRenderCacheResolveDescriptor();
     void destroyRenderCacheResolvePipeline();
     void destroyRenderCacheResolveResources();
     bool drawRenderCacheResolve(int width, int height);
+    std::vector<core::Rect> resolveRenderCacheBlitRects(int width,
+                                                        int height,
+                                                        RenderCacheBlitMode mode,
+                                                        const std::vector<core::Rect>& dirtyRects);
+    void recordRenderCacheBlitHistory(std::uint64_t generation, bool fullSync, const std::vector<core::Rect>& rects);
+    void invalidateRenderCacheSync();
+    void setPresentDirtyRects(const std::vector<core::Rect>& rects);
     VkExtent2D currentRenderExtent() const;
+    VkRect2D currentRenderArea() const;
     VkFramebuffer currentFramebuffer() const;
+    VkImage currentRenderImage() const;
+    VkImageLayout currentRenderImageLayout() const;
+    void setCurrentRenderImageLayout(VkImageLayout layout);
     VkCommandBuffer currentCommandBuffer() const;
     bool hasCurrentCommandBuffer() const;
     void endActiveRenderPass();
@@ -109,11 +171,11 @@ private:
                                VkImage image,
                                VkImageLayout oldLayout,
                                VkImageLayout newLayout);
-    VkRect2D clampScissor(const core::Rect& rect, int windowWidth, int windowHeight);
-    bool ensureCanvasPipeline();
-    bool ensureCanvasVertexBuffer(std::size_t vertexCount);
-    void destroyCanvasPipeline();
+    VkRect2D clampScissor(const core::Rect& rect, int windowWidth, int windowHeight) const;
     bool ensureRoundedRectPipeline();
+    bool ensurePolygonPipeline();
+    bool ensureCanvasPipeline();
+    bool ensurePolygonEdgeBuffer(std::size_t edgeCount);
     bool ensureBackdropResources(std::uint32_t width, std::uint32_t height);
     bool ensureBackdropDescriptor();
     void initializeBackdropImageIfNeeded();
@@ -123,13 +185,16 @@ private:
     bool ensureTextAtlas(const TextAtlasPageData& page);
     bool ensureTextDescriptor();
     bool ensureTextVertexBuffer(std::size_t floatCount);
-    bool ensureImagePipeline();
+    bool ensureImagePipeline(bool premultipliedAlpha = false);
     bool ensureImageDescriptor(TextureResource& texture);
     bool ensureImageVertexBuffer();
     bool allocateUploadRegion(VkDeviceSize size, VkBuffer& buffer, VkDeviceSize& offset, void*& mapped);
     bool createUploadBuffer(VkDeviceSize capacity);
     void destroyUploadBuffer();
     void destroyRoundedRectPipeline();
+    void destroyPolygonPipeline();
+    void destroyCanvasPipeline();
+    void destroyPolygonEdgeBuffer();
     void destroyBackdropResources();
     void destroyBackdropDescriptorPool();
     void destroyPrimitiveVertexBuffer();
@@ -174,8 +239,13 @@ private:
     bool scissorEnabled_ = false;
     bool swapchainTransferSrcSupported_ = false;
     bool swapchainTransferDstSupported_ = false;
+    bool incrementalPresentSupported_ = false;
     bool backdropReady_ = false;
+    RenderTarget renderTarget_ = RenderTarget::Swapchain;
+    RenderTarget previousLayerTarget_ = RenderTarget::Swapchain;
+    LayerResource* activeLayer_ = nullptr;
     core::Rect scissorRect_{};
+    core::Rect cacheRenderArea_{};
     core::Color clearColor_{0.0f, 0.0f, 0.0f, 1.0f};
 
     VkDescriptorSetLayout roundedRectDescriptorSetLayout_ = VK_NULL_HANDLE;
@@ -183,10 +253,6 @@ private:
     VkDescriptorSet roundedRectDescriptorSet_ = VK_NULL_HANDLE;
     VkPipelineLayout roundedRectPipelineLayout_ = VK_NULL_HANDLE;
     VkPipeline roundedRectPipeline_ = VK_NULL_HANDLE;
-
-    VkPipelineLayout canvasPipelineLayout_ = VK_NULL_HANDLE;
-    VkPipeline canvasPipeline_ = VK_NULL_HANDLE;
-    MappedBuffer canvasVertices_;
     VkImage backdropImage_ = VK_NULL_HANDLE;
     VkDeviceMemory backdropImageMemory_ = VK_NULL_HANDLE;
     VkImageView backdropImageView_ = VK_NULL_HANDLE;
@@ -194,6 +260,15 @@ private:
     VkImageLayout backdropImageLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
     VkExtent2D backdropExtent_{};
     MappedBuffer primitiveVertices_;
+    VkDescriptorSetLayout polygonDescriptorSetLayout_ = VK_NULL_HANDLE;
+    VkDescriptorPool polygonDescriptorPool_ = VK_NULL_HANDLE;
+    VkDescriptorSet polygonDescriptorSet_ = VK_NULL_HANDLE;
+    VkPipelineLayout polygonPipelineLayout_ = VK_NULL_HANDLE;
+    VkPipeline polygonPipeline_ = VK_NULL_HANDLE;
+    MappedBuffer polygonEdges_;
+    VkDescriptorSetLayout canvasDescriptorSetLayout_ = VK_NULL_HANDLE;
+    VkPipelineLayout canvasPipelineLayout_ = VK_NULL_HANDLE;
+    VkPipeline canvasPipeline_ = VK_NULL_HANDLE;
 
     VkImage renderCacheImage_ = VK_NULL_HANDLE;
     VkDeviceMemory renderCacheMemory_ = VK_NULL_HANDLE;
@@ -203,6 +278,10 @@ private:
     VkExtent2D renderCacheExtent_{};
     bool renderCacheRecreated_ = false;
     bool renderingToCache_ = false;
+    std::uint64_t renderCacheGeneration_ = 0;
+    std::vector<std::uint64_t> swapchainImageCacheGenerations_;
+    std::vector<RenderCacheHistoryEntry> renderCacheHistory_;
+    std::vector<core::Rect> presentDirtyRects_;
     VkDescriptorSetLayout renderCacheResolveDescriptorSetLayout_ = VK_NULL_HANDLE;
     VkDescriptorPool renderCacheResolveDescriptorPool_ = VK_NULL_HANDLE;
     VkDescriptorSet renderCacheResolveDescriptorSet_ = VK_NULL_HANDLE;
@@ -226,9 +305,11 @@ private:
     std::uint32_t imageDescriptorPoolCapacity_ = 0;
     VkPipelineLayout imagePipelineLayout_ = VK_NULL_HANDLE;
     VkPipeline imagePipeline_ = VK_NULL_HANDLE;
+    VkPipeline imagePremultipliedPipeline_ = VK_NULL_HANDLE;
     MappedBuffer imageVertices_;
     UploadArena uploadArena_;
     std::vector<TextureResource*> pendingTextureDeletes_;
+    std::vector<LayerResource*> layers_;
 
 };
 

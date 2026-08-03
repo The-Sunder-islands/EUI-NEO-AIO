@@ -3,6 +3,7 @@
 #include "components/theme.h"
 #include "core/dsl.h"
 #include "core/render/text.h"
+#include "eui/signal.h"
 
 #include <algorithm>
 #include <functional>
@@ -12,7 +13,7 @@
 namespace components {
 
 struct RadioStyle {
-    RadioStyle() : RadioStyle(theme::DarkThemeColors()) {}
+    RadioStyle() : RadioStyle(theme::dark()) {}
 
     explicit RadioStyle(const theme::ThemeColorTokens& tokens) {
         outer = tokens.surface;
@@ -40,7 +41,11 @@ public:
 
     RadioBuilder& size(float width, float height) { width_ = width; height_ = height; return *this; }
     RadioBuilder& selected(bool value) { selected_ = value; return *this; }
-    RadioBuilder& checked(bool value) { return selected(value); }
+    RadioBuilder& bind(eui::Signal<bool>& signal) {
+        selected(signal.get());
+        onChange([&signal](bool value) { signal.set(value); });
+        return *this;
+    }
     RadioBuilder& text(std::string value) { text_ = std::move(value); return *this; }
     RadioBuilder& fontSize(float value) { fontSize_ = std::max(1.0f, value); return *this; }
     RadioBuilder& dotSize(float value) { dotSize_ = std::max(10.0f, value); return *this; }
@@ -51,7 +56,6 @@ public:
         transition_ = core::Transition::make(duration, ease);
         return *this;
     }
-    RadioBuilder& onSelect(std::function<void()> callback) { onSelect_ = std::move(callback); return *this; }
     RadioBuilder& onChange(std::function<void(bool)> callback) { onChange_ = std::move(callback); return *this; }
 
     void build() {
@@ -61,16 +65,17 @@ public:
         const float outerY = (height_ - outer) * 0.5f;
         const float innerOffset = (outer - visibleInner) * 0.5f;
         const float labelX = outer + gap_;
-        const float labelWidth = std::max(0.0f, width_ - labelX);
+        const float horizontalInset = 10.0f;
+        const float contentX = horizontalInset;
+        const float labelWidth = std::max(0.0f, width_ - labelX - horizontalInset);
         const float labelLineHeight = fontSize_;
         const float labelY = std::max(0.0f, (height_ - labelLineHeight) * 0.5f);
         const float hitWidth = text_.empty()
-            ? outer
-            : std::min(width_, labelX + textWidth(text_, fontSize_));
+            ? outer + horizontalInset * 2.0f
+            : std::min(width_, labelX + textWidth(text_, fontSize_) + horizontalInset * 2.0f);
         core::Transition dotTransition = transition_;
         dotTransition.durationSeconds = selected_ ? 0.16f : 0.10f;
         dotTransition.ease = core::Ease::OutCubic;
-        const std::function<void()> onSelect = onSelect_;
         const std::function<void(bool)> onChange = onChange_;
 
         ui_.stack(id_)
@@ -81,10 +86,7 @@ public:
                     .states(theme::color(0.0f, 0.0f, 0.0f, 0.0f), style_.rowHover, style_.rowPressed)
                     .radius(std::max(6.0f, height_ * 0.20f))
                     .transition(transition_)
-                    .onClick([onSelect, onChange] {
-                        if (onSelect) {
-                            onSelect();
-                        }
+                    .onClick([onChange] {
                         if (onChange) {
                             onChange(true);
                         }
@@ -92,6 +94,7 @@ public:
                     .build();
 
                 ui_.rect(id_ + ".outer")
+                    .x(contentX)
                     .y(outerY)
                     .size(outer, outer)
                     .color(selected_ ? theme::withAlpha(style_.selected, 0.18f) : style_.outer)
@@ -102,7 +105,7 @@ public:
                     .build();
 
                 ui_.rect(id_ + ".inner")
-                    .x(innerOffset)
+                    .x(contentX + innerOffset)
                     .y(outerY + innerOffset)
                     .size(visibleInner, visibleInner)
                     .color(style_.selected)
@@ -114,7 +117,7 @@ public:
 
                 if (!text_.empty()) {
                     ui_.text(id_ + ".label")
-                        .x(labelX)
+                        .x(contentX + labelX)
                         .y(labelY)
                         .size(labelWidth, labelLineHeight)
                         .text(text_)
@@ -137,7 +140,6 @@ private:
     std::string id_;
     RadioStyle style_;
     core::Transition transition_ = core::Transition::make(0.16f, core::Ease::OutCubic);
-    std::function<void()> onSelect_;
     std::function<void(bool)> onChange_;
     std::string text_;
     bool selected_ = false;

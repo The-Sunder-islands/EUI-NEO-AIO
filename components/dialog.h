@@ -3,6 +3,7 @@
 #include "components/button.h"
 #include "components/theme.h"
 #include "core/dsl.h"
+#include "eui/signal.h"
 
 #include <algorithm>
 #include <functional>
@@ -12,7 +13,7 @@
 namespace components {
 
 struct DialogStyle {
-    DialogStyle() : DialogStyle(theme::DarkThemeColors()) {}
+    DialogStyle() : DialogStyle(theme::dark()) {}
 
     explicit DialogStyle(const theme::ThemeColorTokens& tokens) {
         backdrop = theme::color(0.0f, 0.0f, 0.0f, tokens.dark ? 0.46f : 0.28f);
@@ -50,6 +51,11 @@ public:
         : ui_(ui), id_(std::move(id)) {}
 
     DialogBuilder& open(bool value = true) { open_ = value; return *this; }
+    DialogBuilder& bindOpen(eui::Signal<bool>& signal) {
+        open(signal.get());
+        onOpenChange([&signal](bool value) { signal.set(value); });
+        return *this;
+    }
     DialogBuilder& screen(float width, float height) { screenWidth_ = width; screenHeight_ = height; return *this; }
     DialogBuilder& size(float width, float height) { width_ = width; height_ = height; return *this; }
     DialogBuilder& title(const std::string& value) { title_ = value; return *this; }
@@ -60,10 +66,10 @@ public:
     DialogBuilder& theme(const theme::ThemeColorTokens& tokens) { style_ = DialogStyle(tokens); return *this; }
     DialogBuilder& transition(const core::Transition& value) { transition_ = value; return *this; }
     DialogBuilder& zIndex(int value) { zIndex_ = value; return *this; }
-    DialogBuilder& z(int value) { return zIndex(value); }
+    DialogBuilder& content(std::function<void()> callback) { content_ = std::move(callback); return *this; }
     DialogBuilder& onPrimary(std::function<void()> callback) { onPrimary_ = std::move(callback); return *this; }
     DialogBuilder& onSecondary(std::function<void()> callback) { onSecondary_ = std::move(callback); return *this; }
-    DialogBuilder& onClose(std::function<void()> callback) { onClose_ = std::move(callback); return *this; }
+    DialogBuilder& onOpenChange(std::function<void(bool)> callback) { onOpenChange_ = std::move(callback); return *this; }
 
     void build() {
         const float width = std::min(width_, std::max(0.0f, screenWidth_ - 48.0f));
@@ -76,9 +82,9 @@ public:
         const float visible = open_ ? 1.0f : 0.0f;
         const float panelScale = open_ ? 1.0f : 0.965f;
         const float panelOffsetY = open_ ? 0.0f : 14.0f;
-        const std::function<void()> onClose = onClose_;
+        const std::function<void()> requestClose = closeCallback();
         const std::function<void()> onPrimary = onPrimary_;
-        const std::function<void()> onSecondary = onSecondary_ ? onSecondary_ : onClose_;
+        const std::function<void()> onSecondary = onSecondary_ ? onSecondary_ : requestClose;
 
         ui_.stack(id_)
             .size(screenWidth_, screenHeight_)
@@ -91,7 +97,7 @@ public:
                     .transition(transition_)
                     .animate(core::AnimProperty::Opacity)
                     .disabled(!open_)
-                    .onClick(onClose)
+                    .onClick(requestClose)
                     .onScroll([](const core::ScrollEvent&) {})
                     .build();
 
@@ -105,6 +111,7 @@ public:
                     .transformOrigin(0.5f, 0.5f)
                     .transition(transition_)
                     .animate(core::AnimProperty::Opacity | core::AnimProperty::Transform)
+                    .disabled(!open_)
                     .content([&] {
                         ui_.rect(id_ + ".panel.bg")
                             .size(width, height)
@@ -119,69 +126,72 @@ public:
                             .states(theme::color(0.0f, 0.0f, 0.0f, 0.0f),
                                     theme::color(0.0f, 0.0f, 0.0f, 0.0f),
                                     theme::color(0.0f, 0.0f, 0.0f, 0.0f))
-                            .disabled(!open_)
                             .onClick([] {})
                             .build();
 
-                        ui_.text(id_ + ".title")
-                            .x(24.0f)
-                            .y(22.0f)
-                            .size(contentWidth, 32.0f)
-                            .text(title_)
-                            .fontSize(24.0f)
-                            .lineHeight(30.0f)
-                            .color(style_.title)
-                            .build();
+                        if (content_) {
+                            content_();
+                        } else {
+                            ui_.text(id_ + ".title")
+                                .x(24.0f)
+                                .y(22.0f)
+                                .size(contentWidth, 32.0f)
+                                .text(title_)
+                                .fontSize(24.0f)
+                                .lineHeight(30.0f)
+                                .color(style_.title)
+                                .build();
 
-                        ui_.text(id_ + ".message")
-                            .x(24.0f)
-                            .y(64.0f)
-                            .size(contentWidth, std::max(0.0f, height - 138.0f))
-                            .text(message_)
-                            .fontSize(17.0f)
-                            .lineHeight(24.0f)
-                            .maxWidth(contentWidth)
-                            .wrap(true)
-                            .color(style_.message)
-                            .build();
+                            ui_.text(id_ + ".message")
+                                .x(24.0f)
+                                .y(64.0f)
+                                .size(contentWidth, std::max(0.0f, height - 138.0f))
+                                .text(message_)
+                                .fontSize(17.0f)
+                                .lineHeight(24.0f)
+                                .maxWidth(contentWidth)
+                                .wrap(true)
+                                .color(style_.message)
+                                .build();
 
-                        ui_.row(id_ + ".actions")
-                            .x(std::max(24.0f, width - buttonRowWidth - 24.0f))
-                            .y(std::max(88.0f, height - 58.0f))
-                            .size(buttonRowWidth, 42.0f)
-                            .gap(12.0f)
-                            .content([&] {
-                                components::button(ui_, id_ + ".secondary")
-                                    .size(buttonWidth, 42.0f)
-                                    .text(secondaryText_)
-                                    .fontSize(16.0f)
-                                    .colors(style_.secondary,
-                                            style_.secondaryHover,
-                                            style_.secondaryPressed)
-                                    .textColor(style_.title)
-                                    .iconColor(style_.title)
-                                    .radius(10.0f)
-                                    .border(1.0f, style_.border)
-                                    .shadow(0.0f, 0.0f, 0.0f, theme::color(0.0f, 0.0f, 0.0f, 0.0f))
-                                    .disabled(!open_)
-                                    .onClick(onSecondary)
-                                    .build();
+                            ui_.row(id_ + ".actions")
+                                .x(std::max(24.0f, width - buttonRowWidth - 24.0f))
+                                .y(std::max(88.0f, height - 58.0f))
+                                .size(buttonRowWidth, 42.0f)
+                                .gap(12.0f)
+                                .content([&] {
+                                    components::button(ui_, id_ + ".secondary")
+                                        .size(buttonWidth, 42.0f)
+                                        .text(secondaryText_)
+                                        .fontSize(16.0f)
+                                        .colors(style_.secondary,
+                                                style_.secondaryHover,
+                                                style_.secondaryPressed)
+                                        .textColor(style_.title)
+                                        .iconColor(style_.title)
+                                        .radius(10.0f)
+                                        .border(1.0f, style_.border)
+                                        .shadow(0.0f, 0.0f, 0.0f, theme::color(0.0f, 0.0f, 0.0f, 0.0f))
+                                        .disabled(!open_)
+                                        .onClick(onSecondary)
+                                        .build();
 
-                                components::button(ui_, id_ + ".primary")
-                                    .size(buttonWidth, 42.0f)
-                                    .text(primaryText_)
-                                    .fontSize(16.0f)
-                                    .colors(style_.primary,
-                                            style_.primaryHover,
-                                            style_.primaryPressed)
-                                    .radius(10.0f)
-                                    .border(1.0f, theme::withAlpha(style_.primary, 0.64f))
-                                    .shadow(10.0f, 0.0f, 3.0f, theme::withAlpha(style_.primary, 0.18f))
-                                    .disabled(!open_)
-                                    .onClick(onPrimary)
-                                    .build();
-                            })
-                            .build();
+                                    components::button(ui_, id_ + ".primary")
+                                        .size(buttonWidth, 42.0f)
+                                        .text(primaryText_)
+                                        .fontSize(16.0f)
+                                        .colors(style_.primary,
+                                                style_.primaryHover,
+                                                style_.primaryPressed)
+                                        .radius(10.0f)
+                                        .border(1.0f, theme::withAlpha(style_.primary, 0.64f))
+                                        .shadow(10.0f, 0.0f, 3.0f, theme::withAlpha(style_.primary, 0.18f))
+                                        .disabled(!open_)
+                                        .onClick(onPrimary)
+                                        .build();
+                                })
+                                .build();
+                        }
                     })
                     .build();
             })
@@ -189,13 +199,23 @@ public:
     }
 
 private:
+    std::function<void()> closeCallback() const {
+        const std::function<void(bool)> onOpenChange = onOpenChange_;
+        return [onOpenChange] {
+            if (onOpenChange) {
+                onOpenChange(false);
+            }
+        };
+    }
+
     core::dsl::Ui& ui_;
     std::string id_;
     DialogStyle style_;
     core::Transition transition_ = core::Transition::make(0.16f, core::Ease::OutCubic);
     std::function<void()> onPrimary_;
     std::function<void()> onSecondary_;
-    std::function<void()> onClose_;
+    std::function<void(bool)> onOpenChange_;
+    std::function<void()> content_;
     std::string title_ = "Dialog";
     std::string message_ = "Use dialogs for focused confirmation or short blocking workflows.";
     std::string primaryText_ = "Confirm";

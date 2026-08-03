@@ -2,6 +2,7 @@
 
 #include "components/theme.h"
 #include "core/dsl.h"
+#include "eui/signal.h"
 
 #include <algorithm>
 #include <functional>
@@ -12,7 +13,7 @@
 namespace components {
 
 struct DropdownStyle {
-    DropdownStyle() : DropdownStyle(theme::DarkThemeColors()) {}
+    DropdownStyle() : DropdownStyle(theme::dark()) {}
 
     explicit DropdownStyle(const theme::ThemeColorTokens& tokens) {
         field = tokens.surface;
@@ -54,14 +55,23 @@ public:
     DropdownBuilder& size(float width, float height) { width_ = width; height_ = height; return *this; }
     DropdownBuilder& items(std::vector<std::string> value) { items_ = std::move(value); return *this; }
     DropdownBuilder& selected(int value) { selected_ = value; return *this; }
+    DropdownBuilder& bind(eui::Signal<int>& signal) {
+        selected(signal.get());
+        onChange([&signal](int value) { signal.set(value); });
+        return *this;
+    }
     DropdownBuilder& placeholder(const std::string& value) { placeholder_ = value; return *this; }
     DropdownBuilder& open(bool value = true) { open_ = value; return *this; }
+    DropdownBuilder& bindOpen(eui::Signal<bool>& signal) {
+        open(signal.get());
+        onOpenChange([&signal](bool value) { signal.set(value); });
+        return *this;
+    }
     DropdownBuilder& itemHeight(float value) { itemHeight_ = std::max(24.0f, value); return *this; }
     DropdownBuilder& style(const DropdownStyle& value) { style_ = value; return *this; }
     DropdownBuilder& theme(const theme::ThemeColorTokens& tokens) { style_ = DropdownStyle(tokens); return *this; }
     DropdownBuilder& transition(const core::Transition& value) { transition_ = value; return *this; }
     DropdownBuilder& zIndex(int value) { zIndex_ = value; return *this; }
-    DropdownBuilder& z(int value) { return zIndex(value); }
     DropdownBuilder& onChange(std::function<void(int)> callback) { onChange_ = std::move(callback); return *this; }
     DropdownBuilder& onOpenChange(std::function<void(bool)> callback) { onOpenChange_ = std::move(callback); return *this; }
 
@@ -72,8 +82,7 @@ public:
         const float popupGap = 8.0f;
         const float popupPadding = 6.0f;
         const float popupHeight = itemHeight_ * static_cast<float>(std::max(1, count)) + popupPadding * 2.0f;
-        const float rootHeight = height_;
-        const int popupZIndex = zIndex_ + 1000;
+        const float rootHeight = height_ + popupGap + popupHeight;
         const float visible = open_ ? 1.0f : 0.0f;
         const float popupOffsetY = open_ ? 0.0f : -6.0f;
         const float popupScale = open_ ? 1.0f : 0.96f;
@@ -123,7 +132,6 @@ public:
                 ui_.stack(id_ + ".popup")
                     .y(height_ + popupGap)
                     .size(width_, popupHeight)
-                    .zIndex(popupZIndex)
                     .opacity(visible)
                     .translateY(popupOffsetY)
                     .scale(popupScale)

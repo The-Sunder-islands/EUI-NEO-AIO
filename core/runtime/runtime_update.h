@@ -7,7 +7,7 @@ inline void Runtime::addDirtyRect(const Rect& rect) {
         return;
     }
     dirtyRects_.push_back({rect.x, rect.y, rect.width, rect.height});
-    needsRender_ = true;
+    paintRequested_ = true;
 }
 
 inline void Runtime::addDirtyUnion(const Rect& before, const Rect& after) {
@@ -15,7 +15,7 @@ inline void Runtime::addDirtyUnion(const Rect& before, const Rect& after) {
 }
 
 inline void Runtime::promoteBackdropBlurDirtyRegions(float dpiScale) {
-    if (fullRedraw_ || dirtyRects_.empty()) {
+    if (fullPaintRequested_ || dirtyRects_.empty() || !ui_.hasBackdropBlur()) {
         return;
     }
 
@@ -35,7 +35,7 @@ inline void Runtime::promoteBackdropBlurDirtyRegions(float dpiScale) {
     const RenderTransform identity;
     do {
         expandedThisPass = false;
-        const std::vector<const Element*> roots = orderedElements(ui_.roots());
+        const std::vector<const Element*>& roots = orderedElements(ui_);
         for (const Element* root : roots) {
             expandBackdropBlurDirtyRegions(*root, dpiScale, identity, mergedDirty, expandedThisPass);
         }
@@ -45,7 +45,7 @@ inline void Runtime::promoteBackdropBlurDirtyRegions(float dpiScale) {
     if (expandedAny) {
         dirtyRects_.clear();
         dirtyRects_.push_back({mergedDirty.x, mergedDirty.y, mergedDirty.width, mergedDirty.height});
-        needsRender_ = true;
+        paintRequested_ = true;
     }
 }
 
@@ -55,6 +55,10 @@ inline void Runtime::expandBackdropBlurDirtyRegions(
     const RenderTransform& inheritedTransform,
     Rect& mergedDirty,
     bool& expanded) {
+    if (!element.subtreeHasBackdropBlur) {
+        return;
+    }
+
     const RenderTransform renderTransform = resolveRenderTransform(element, dpiScale, inheritedTransform);
     if (element.kind == ElementKind::Rect) {
         const auto instance = rects_.find(element.id);
@@ -73,7 +77,7 @@ inline void Runtime::expandBackdropBlurDirtyRegions(
         }
     }
 
-    const std::vector<const Element*> children = orderedElements(element.children);
+    const std::vector<const Element*>& children = orderedElements(element);
     for (const Element* child : children) {
         expandBackdropBlurDirtyRegions(*child, dpiScale, renderTransform, mergedDirty, expanded);
     }
@@ -175,12 +179,20 @@ inline runtime::DependentVisualState Runtime::dependentVisualStateForElement(
 }
 
 inline void Runtime::updateDependentVisualDirtyRegions(float dpiScale) {
+    if (!ui_.hasDependentVisuals()) {
+        for (const auto& item : dependentVisualStates_) {
+            addDirtyRect(item.second.rect);
+        }
+        dependentVisualStates_.clear();
+        return;
+    }
+
     for (auto& item : dependentVisualStates_) {
         item.second.seen = false;
     }
 
     const RenderTransform identity;
-    const std::vector<const Element*> roots = orderedElements(ui_.roots());
+    const std::vector<const Element*>& roots = orderedElements(ui_);
     for (const Element* root : roots) {
         updateDependentVisualDirtyRegions(*root, dpiScale, identity);
     }
@@ -199,12 +211,16 @@ inline void Runtime::updateDependentVisualDirtyRegions(
     const Element& element,
     float dpiScale,
     const RenderTransform& inheritedTransform) {
+    if (!element.subtreeHasDependentVisuals) {
+        return;
+    }
+
     if (!element.hoverOpacitySourceId.empty() || !element.visualStateSourceId.empty()) {
         const runtime::DependentVisualState current = dependentVisualStateForElement(element, dpiScale, inheritedTransform);
         auto item = dependentVisualStates_.find(element.id);
         if (item == dependentVisualStates_.end()) {
             dependentVisualStates_.emplace(element.id, current);
-            if (!fullRedraw_ && current.opacity > 0.001f) {
+            if (!fullPaintRequested_ && current.opacity > 0.001f) {
                 addDirtyRect(current.rect);
             }
         } else {
@@ -224,7 +240,7 @@ inline void Runtime::updateDependentVisualDirtyRegions(
     }
 
     const RenderTransform renderTransform = resolveRenderTransform(element, dpiScale, inheritedTransform);
-    const std::vector<const Element*> children = orderedElements(element.children);
+    const std::vector<const Element*>& children = orderedElements(element);
     for (const Element* child : children) {
         updateDependentVisualDirtyRegions(*child, dpiScale, renderTransform);
     }
@@ -232,7 +248,7 @@ inline void Runtime::updateDependentVisualDirtyRegions(
 
 template <typename Fn>
 inline void Runtime::forEachElement(Fn&& fn) const {
-    const std::vector<const Element*> roots = orderedElements(ui_.roots());
+    const std::vector<const Element*>& roots = orderedElements(ui_);
     for (const Element* root : roots) {
         forEachElement(*root, fn);
     }
@@ -241,7 +257,7 @@ inline void Runtime::forEachElement(Fn&& fn) const {
 template <typename Fn>
 inline void Runtime::forEachElement(const Element& element, Fn&& fn) {
     fn(element);
-    const std::vector<const Element*> children = orderedElements(element.children);
+    const std::vector<const Element*>& children = orderedElements(element);
     for (const Element* child : children) {
         forEachElement(*child, fn);
     }
@@ -259,6 +275,67 @@ inline std::vector<runtime::ElementSnapshot> Runtime::collectElementStructure() 
         });
     });
     return result;
+}
+
+inline bool Runtime::canReuseStaticSubtree(
+    const Element& element,
+    const PointerEvent& event,
+    float dpiScale,
+    const RenderTransform& inheritedTransform,
+    bool ancestorFrameChanged,
+    bool ancestorDisabled) const {
+    if (fullTreeUpdateRequested_ ||
+        pruneInstancesRequested_ ||
+        ancestorFrameChanged ||
+        ancestorDisabled ||
+        element.subtreeNeedsUpdate ||
+        !focusedId_.empty()) {
+        return false;
+    }
+
+    const auto cached = paintBounds_.find(element.id);
+    if (cached == paintBounds_.end() || !cached->second.hasSubtree) {
+        return false;
+    }
+
+    const Rect subtree = toPixelRect(cached->second.subtree, dpiScale);
+    if (subtree.contains(event.x, event.y)) {
+        return false;
+    }
+
+    const RenderTransform renderTransform = resolveRenderTransform(element, dpiScale, inheritedTransform);
+    return !renderTransform.active && closeEnough(renderTransform.opacity, 1.0f);
+}
+
+inline bool Runtime::elementHasActiveAnimation(const Element& element) const {
+    if (element.kind == ElementKind::Row ||
+        element.kind == ElementKind::Column ||
+        element.kind == ElementKind::Stack ||
+        element.kind == ElementKind::Flow) {
+        const auto item = layouts_.find(element.id);
+        return item != layouts_.end() && isLayoutAnimating(item->second);
+    }
+    if (element.kind == ElementKind::Rect) {
+        const auto item = rects_.find(element.id);
+        return item != rects_.end() && isRectAnimating(element, item->second);
+    }
+    if (element.kind == ElementKind::Polygon) {
+        const auto item = polygons_.find(element.id);
+        return item != polygons_.end() && isPolygonAnimating(element, item->second);
+    }
+    if (element.kind == ElementKind::Text) {
+        const auto item = texts_.find(element.id);
+        return item != texts_.end() && isTextAnimating(item->second);
+    }
+    if (element.kind == ElementKind::Image || element.kind == ElementKind::Svg) {
+        const auto item = images_.find(element.id);
+        return item != images_.end() && isImageAnimating(item->second);
+    }
+    if (element.kind == ElementKind::Canvas) {
+        const auto item = canvases_.find(element.id);
+        return item != canvases_.end() && isCanvasAnimating(item->second);
+    }
+    return false;
 }
 
 inline Transform Runtime::pointerRuntimeTransform(
@@ -364,6 +441,8 @@ inline void Runtime::markInstancesUnseen() {
     runtime::markEntriesUnseen(scrollStates_);
     runtime::markEntriesUnseen(sliderStates_);
     runtime::markEntriesUnseen(frameTargets_);
+    runtime::markEntriesUnseen(paintBounds_);
+    runtime::markEntriesUnseen(retainedLayers_);
 }
 
 inline void Runtime::releaseUnseenInstances() {
@@ -374,6 +453,14 @@ inline void Runtime::releaseUnseenInstances() {
         }
     };
     auto noop = [](auto&) {};
+    auto releaseLayer = [](runtime::RetainedLayerInstance& instance) {
+        core::render::RenderBackend* renderBackend = core::render::activeRenderBackend();
+        if (renderBackend != nullptr && instance.handle != nullptr) {
+            renderBackend->destroyLayer(instance.handle);
+        }
+        instance.handle = nullptr;
+        instance.valid = false;
+    };
 
     runtime::releaseUnseenEntries(rects_, releasePrimitive);
     runtime::releaseUnseenEntries(polygons_, releasePrimitive);
@@ -386,6 +473,8 @@ inline void Runtime::releaseUnseenInstances() {
     runtime::releaseUnseenEntries(scrollStates_, noop);
     runtime::releaseUnseenEntries(sliderStates_, noop);
     runtime::releaseUnseenEntries(frameTargets_, noop);
+    runtime::releaseUnseenEntries(paintBounds_, noop);
+    runtime::releaseUnseenEntries(retainedLayers_, releaseLayer);
 }
 
 inline void Runtime::markTimersUnseen() {
@@ -425,8 +514,8 @@ inline void Runtime::updateTimer(const Element& element, float deltaSeconds) {
     if (instance.elapsed >= instance.seconds) {
         instance.active = false;
         element.onTimer();
-        needsCompose_ = true;
-        needsRender_ = true;
+        composeRequested_ = true;
+        paintRequested_ = true;
     } else {
         animating_ = true;
     }
@@ -437,8 +526,8 @@ inline void Runtime::updateFrameCallback(const Element& element, float deltaSeco
         return;
     }
     element.onFrame(std::max(0.0f, deltaSeconds));
-    needsCompose_ = true;
-    needsRender_ = true;
+    composeRequested_ = true;
+    paintRequested_ = true;
     animating_ = true;
 }
 
@@ -477,7 +566,8 @@ inline RenderTransform Runtime::resolveRenderTransform(const Element& element, f
 
     if (element.kind == ElementKind::Row ||
         element.kind == ElementKind::Column ||
-        element.kind == ElementKind::Stack) {
+        element.kind == ElementKind::Stack ||
+        element.kind == ElementKind::Flow) {
         const auto layout = layouts_.find(element.id);
         if (layout != layouts_.end()) {
             const Transform local = layout->second.transform.value();
@@ -658,7 +748,7 @@ inline void Runtime::setSliderValue(const std::string& stateId, float value, boo
 
     instance.value = next;
     addSliderDirtyRect(instance);
-    needsRender_ = true;
+    paintRequested_ = true;
     if (const Element* owner = ui_.find(stateId)) {
         if (owner->onSliderValueChanged && !owner->disabled) {
             owner->onSliderValueChanged(instance.value);
@@ -678,30 +768,45 @@ inline void Runtime::updateElementTree(
     float deltaSeconds,
     float dpiScale,
     const std::string& hoverTargetId) {
+    runtime::markEntriesUnseen(paintBounds_);
     const RenderTransform identity;
-    const std::vector<const Element*> roots = orderedElements(ui_.roots());
+    const std::vector<const Element*>& roots = orderedElements(ui_);
     for (const Element* root : roots) {
-        updateElementTree(*root, event, deltaSeconds, dpiScale, hoverTargetId, identity, false);
+        updateElementTree(*root, event, deltaSeconds, dpiScale, hoverTargetId, identity, false, false);
     }
 }
 
-inline void Runtime::updateElementTree(
+inline runtime::PaintBoundsInstance Runtime::updateElementTree(
     const Element& element,
     const PointerEvent& event,
     float deltaSeconds,
     float dpiScale,
     const std::string& hoverTargetId,
     const RenderTransform& inheritedTransform,
-    bool ancestorFrameChanged) {
+    bool ancestorFrameChanged,
+    bool ancestorDisabled) {
+    const bool disabledTree = ancestorDisabled || element.disabled;
+    if (canReuseStaticSubtree(element, event, dpiScale, inheritedTransform, ancestorFrameChanged, disabledTree)) {
+        runtime::PaintBoundsInstance cached = paintBounds_[element.id];
+        cached.seen = true;
+        paintBounds_[element.id] = cached;
+        return cached;
+    }
+
     const bool frameTargetChanged = updateFrameTarget(element);
     updateExplicitDirtyKey(element, dpiScale, inheritedTransform);
-    updateInteraction(element, event, dpiScale, hoverTargetId, inheritedTransform);
+    if (disabledTree) {
+        interactionInstance(element.id).state.update({}, event, false, false);
+    } else {
+        updateInteraction(element, event, dpiScale, hoverTargetId, inheritedTransform);
+    }
     updateTimer(element, deltaSeconds);
     updateFrameCallback(element, deltaSeconds);
 
     if (element.kind == ElementKind::Row ||
         element.kind == ElementKind::Column ||
-        element.kind == ElementKind::Stack) {
+        element.kind == ElementKind::Stack ||
+        element.kind == ElementKind::Flow) {
         updateLayoutElement(element, deltaSeconds, dpiScale, inheritedTransform, event, hoverTargetId);
     } else if (element.kind == ElementKind::Rect) {
         updateRect(element, deltaSeconds, dpiScale, inheritedTransform, ancestorFrameChanged);
@@ -717,10 +822,51 @@ inline void Runtime::updateElementTree(
 
     const bool childAncestorFrameChanged = ancestorFrameChanged || frameTargetChanged;
     const RenderTransform renderTransform = resolveRenderTransform(element, dpiScale, inheritedTransform);
-    const std::vector<const Element*> children = orderedElements(element.children);
-    for (const Element* child : children) {
-        updateElementTree(*child, event, deltaSeconds, dpiScale, hoverTargetId, renderTransform, childAncestorFrameChanged);
+    runtime::PaintBoundsInstance bounds;
+    bounds.seen = true;
+    bounds.subtreeAnimating = elementHasActiveAnimation(element);
+    if (renderTransform.opacity > 0.001f &&
+        element.kind != ElementKind::Row &&
+        element.kind != ElementKind::Column &&
+        element.kind != ElementKind::Stack &&
+        element.kind != ElementKind::Flow) {
+        bounds.own = visualDirtyRectForElement(element, dpiScale, inheritedTransform);
+        bounds.subtree = bounds.own;
+        bounds.hasOwn = bounds.own.width > 0.0f && bounds.own.height > 0.0f;
+        bounds.hasSubtree = bounds.hasOwn;
+        bounds.drawCost = bounds.hasOwn ? 1 : 0;
     }
+
+    const std::vector<const Element*>& children = orderedElements(element);
+    for (const Element* child : children) {
+        const runtime::PaintBoundsInstance childBounds =
+            updateElementTree(*child, event, deltaSeconds, dpiScale, hoverTargetId, renderTransform, childAncestorFrameChanged, disabledTree);
+        bounds.subtreeAnimating = bounds.subtreeAnimating || childBounds.subtreeAnimating;
+        if (!childBounds.hasSubtree) {
+            continue;
+        }
+        bounds.subtree = bounds.hasSubtree ? unionRect(bounds.subtree, childBounds.subtree) : childBounds.subtree;
+        bounds.hasSubtree = true;
+        bounds.drawCost += childBounds.drawCost;
+    }
+
+    if (bounds.hasSubtree && element.clip) {
+        Rect clipped{};
+        const Rect clipFrame = applyRenderTransformToLogicalRect(
+            {element.frame.x, element.frame.y, element.frame.width, element.frame.height},
+            dpiScale,
+            renderTransform);
+        bounds.hasSubtree = intersectRect(bounds.subtree, clipFrame, clipped);
+        bounds.subtree = clipped;
+        if (bounds.hasOwn) {
+            Rect clippedOwn{};
+            bounds.hasOwn = intersectRect(bounds.own, clipFrame, clippedOwn);
+            bounds.own = clippedOwn;
+        }
+    }
+
+    paintBounds_[element.id] = bounds;
+    return bounds;
 }
 
 inline void Runtime::updateLayoutElement(
@@ -865,11 +1011,13 @@ inline void Runtime::updatePolygon(
     bool changed = hoverChanged || pressChanged || pointsChanged;
     changed = instance.frame.setTarget(element.frame, element.transition, !snapFrame && shouldAnimateFrame(element)) || changed;
     changed = instance.color.setTarget(currentColor, element.transition, shouldAnimate(element, AnimProperty::Color)) || changed;
+    changed = instance.radius.setTarget(element.radius, element.transition, shouldAnimate(element, AnimProperty::Radius)) || changed;
     changed = instance.opacity.setTarget(element.opacity, element.transition, shouldAnimate(element, AnimProperty::Opacity)) || changed;
     changed = instance.transform.setTarget(core::dsl::runtimeTransformForElement(element, scrollStates_, sliderStates_, element.transform), element.transition, shouldAnimate(element, AnimProperty::Transform)) || changed;
 
     changed = instance.frame.tick(deltaSeconds) || changed;
     changed = instance.color.tick(deltaSeconds) || changed;
+    changed = instance.radius.tick(deltaSeconds) || changed;
     changed = instance.opacity.tick(deltaSeconds) || changed;
     changed = instance.transform.tick(deltaSeconds) || changed;
 
@@ -1042,19 +1190,25 @@ inline void Runtime::updateCanvas(
     bool changed = false;
     changed = instance.frame.setTarget(element.frame, element.transition, !snapFrame && shouldAnimateFrame(element)) || changed;
     changed = instance.opacity.setTarget(element.opacity, element.transition, shouldAnimate(element, AnimProperty::Opacity)) || changed;
+    changed = instance.radius.setTarget(element.radius, element.transition, shouldAnimate(element, AnimProperty::Radius)) || changed;
     changed = instance.transform.setTarget(core::dsl::runtimeTransformForElement(element, scrollStates_, sliderStates_, element.transform), element.transition, shouldAnimate(element, AnimProperty::Transform)) || changed;
 
     changed = instance.frame.tick(deltaSeconds) || changed;
     changed = instance.opacity.tick(deltaSeconds) || changed;
+    changed = instance.radius.tick(deltaSeconds) || changed;
     changed = instance.transform.tick(deltaSeconds) || changed;
 
-    instance.onDraw = element.onDraw;
+    instance.onDraw = element.onCanvasDraw;
 
-    // Dynamic canvases with onDraw callback always need re-render (content
-    // may change even when layout frame stays the same).
-    if (instance.onDraw) {
-        changed = true;
-    }
+    const LayoutRect frame = instance.frame.value();
+    instance.primitive->setBounds(frame.x, frame.y, frame.width, frame.height);
+    const Transform transform = instance.transform.value();
+    const TransformMatrix matrix = matrixForTransform(
+        {frame.x, frame.y, frame.width, frame.height}, transform);
+    instance.primitive->setTransformMatrix(matrix);
+    instance.primitive->setOpacity(instance.opacity.value());
+    instance.primitive->setCornerRadius(instance.radius.value());
+    instance.primitive->setClipToBounds(true);
 
     if (changed) {
         const Rect afterRect = applyRenderTransformToLogicalRect(
@@ -1066,8 +1220,7 @@ inline void Runtime::updateCanvas(
             inheritedTransform);
         addDirtyUnion(beforeRect, afterRect);
     }
-
-    animating_ = animating_ || changed;
+    animating_ = animating_ || isCanvasAnimating(instance);
 }
 
 } // namespace core::dsl

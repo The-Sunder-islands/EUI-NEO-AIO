@@ -2,6 +2,7 @@
 
 #include "components/theme.h"
 #include "core/dsl.h"
+#include "eui/signal.h"
 
 #include <algorithm>
 #include <array>
@@ -44,6 +45,12 @@ public:
         return *this;
     }
 
+    HeartSwitchBuilder& bind(eui::Signal<bool>& signal) {
+        checked(signal.get());
+        onChange([&signal](bool value) { signal.set(value); });
+        return *this;
+    }
+
     HeartSwitchBuilder& style(const HeartSwitchStyle& value) {
         style_ = value;
         return *this;
@@ -66,11 +73,6 @@ public:
 
     HeartSwitchBuilder& disabled(bool value = true) {
         disabled_ = value;
-        return *this;
-    }
-
-    HeartSwitchBuilder& enabled(bool value = true) {
-        disabled_ = !value;
         return *this;
     }
 

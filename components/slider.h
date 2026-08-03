@@ -2,6 +2,7 @@
 
 #include "components/theme.h"
 #include "core/dsl.h"
+#include "eui/signal.h"
 
 #include <algorithm>
 #include <functional>
@@ -11,7 +12,7 @@
 namespace components {
 
 struct SliderStyle {
-    SliderStyle() : SliderStyle(theme::DarkThemeColors()) {}
+    SliderStyle() : SliderStyle(theme::dark()) {}
 
     explicit SliderStyle(const theme::ThemeColorTokens& tokens) {
         track = core::mixColor(tokens.surfaceHover, tokens.surfaceActive, tokens.dark ? 0.24f : 0.18f);
@@ -31,6 +32,11 @@ public:
 
     SliderBuilder& size(float width, float height) { width_ = width; height_ = height; return *this; }
     SliderBuilder& value(float value) { value_ = std::clamp(value, 0.0f, 1.0f); return *this; }
+    SliderBuilder& bind(eui::Signal<float>& signal) {
+        value(signal.get());
+        onChange([&signal](float value) { signal.set(value); });
+        return *this;
+    }
     SliderBuilder& style(const SliderStyle& value) { style_ = value; return *this; }
     SliderBuilder& theme(const theme::ThemeColorTokens& tokens) { style_ = SliderStyle(tokens); return *this; }
     SliderBuilder& transition(const core::Transition& value) { transition_ = value; return *this; }
@@ -83,7 +89,7 @@ public:
                     .states(theme::color(0.0f, 0.0f, 0.0f, 0.0f),
                             theme::color(0.0f, 0.0f, 0.0f, 0.0f),
                             theme::color(0.0f, 0.0f, 0.0f, 0.0f))
-                    .z(10)
+                    .zIndex(10)
                     .interactive()
                     .sliderInputFrom(id_)
                     .build();

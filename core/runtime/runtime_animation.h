@@ -31,6 +31,7 @@ inline bool isPolygonAnimating(const Element& element, const runtime::PolygonIns
            instance.pressBlend.isMovingTo(interactive && stateColorsVisible && instance.interaction.pressed ? 1.0f : 0.0f) ||
            instance.frame.isActive() ||
            instance.color.isActive() ||
+           instance.radius.isActive() ||
            instance.opacity.isActive() ||
            instance.transform.isActive();
 }
@@ -50,6 +51,13 @@ inline bool isImageAnimating(const runtime::ImageInstance& instance) {
            instance.transform.isActive() ||
            instance.primitive->isAnimating() ||
            instance.primitive->hasPendingLoad();
+}
+
+inline bool isCanvasAnimating(const runtime::CanvasInstance& instance) {
+    return instance.frame.isActive() ||
+           instance.opacity.isActive() ||
+           instance.radius.isActive() ||
+           instance.transform.isActive();
 }
 
 inline bool isLayoutAnimating(const runtime::LayoutInstance& instance) {

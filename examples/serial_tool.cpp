@@ -24,6 +24,7 @@ struct SerialState {
     int mode = 0;
     int tick = 0;
     int sequence = 0;
+    components::LineStyle chartStyle = components::LineStyle::Linear;
     int txFrames = 0;
     int rxFrames = 0;
     int txBytes = 0;
@@ -200,22 +201,41 @@ void record(bool tx, bool hex, int byteCount) {
 }
 
 std::string mockTextPayload() {
-    static constexpr std::array<const char*, 5> kSamples{{
-        "ACK ready",
+    static constexpr std::array<const char*, 6> kSamples{{
+        "ACK",
         "RX temperature=24.8C",
-        "RX packet OK",
-        "Flow stable",
-        "Device heartbeat"
+        "RX packet OK pressure=101.7kPa",
+        "Flow stable device heartbeat online",
+        "Sensor burst accel=0.12,-0.04,0.98 gyro=1.6,0.2,-0.3",
+        "Frame sync payload block ready checksum verified route=A7 channel=03"
     }};
-    return kSamples[static_cast<std::size_t>(state.sequence) % kSamples.size()];
+    static constexpr std::array<const char*, 5> kExtras{{
+        " rssi=-42",
+        " seq window updated",
+        " cache miss refill",
+        " sample batch committed",
+        " diagnostic trace extended"
+    }};
+
+    std::string payload = kSamples[static_cast<std::size_t>(state.sequence) % kSamples.size()];
+    const int extraCount = (state.sequence * 5 + 1) % 4;
+    for (int i = 0; i < extraCount; ++i) {
+        payload += kExtras[static_cast<std::size_t>((state.sequence + i) % static_cast<int>(kExtras.size()))];
+    }
+    return payload;
 }
 
 std::string mockHexPayload(int hint) {
     const int a = 0xA0 | (state.sequence & 0x0F);
-    const int b = hint & 0xFF;
-    const int c = (state.sequence * 23 + 0x31) & 0xFF;
-    const int sum = (0xAA + 0x55 + a + b + c) & 0xFF;
-    return "AA 55 " + byteHex(a) + " " + byteHex(b) + " " + byteHex(c) + " " + byteHex(sum);
+    const int payloadBytes = 4 + ((state.sequence * 5 + hint) % 28);
+    int sum = 0xAA + 0x55 + a + payloadBytes;
+    std::string payload = "AA 55 " + byteHex(a) + " " + byteHex(payloadBytes);
+    for (int i = 0; i < payloadBytes; ++i) {
+        const int value = (state.sequence * 37 + hint * 11 + i * 29 + 0x31) & 0xFF;
+        sum += value;
+        payload += " " + byteHex(value);
+    }
+    return payload + " " + byteHex(sum & 0xFF);
 }
 
 void receive(bool hex, int hint = 6) {
@@ -314,6 +334,32 @@ std::vector<float> pieValues() {
         static_cast<float>(state.frameMix[2]),
         static_cast<float>(state.frameMix[3])
     };
+}
+
+std::string chartStyleText() {
+    switch (state.chartStyle) {
+    case components::LineStyle::Curve:
+        return "Curve";
+    case components::LineStyle::Step:
+        return "Step";
+    case components::LineStyle::Linear:
+    default:
+        return "Linear";
+    }
+}
+
+void nextChartStyle() {
+    switch (state.chartStyle) {
+    case components::LineStyle::Linear:
+        state.chartStyle = components::LineStyle::Curve;
+        break;
+    case components::LineStyle::Curve:
+        state.chartStyle = components::LineStyle::Step;
+        break;
+    case components::LineStyle::Step:
+        state.chartStyle = components::LineStyle::Linear;
+        break;
+    }
 }
 
 void label(eui::Ui& ui,
@@ -474,14 +520,20 @@ void composeCharts(eui::Ui& ui, float x, float y, float width) {
         .y(y)
         .size(lineW, h)
         .content([&] {
-            components::linechart(ui, "charts.line")
+            components::lineChart(ui, "charts.line")
                 .theme(themeTokens())
                 .size(lineW, h)
                 .title("Throughput")
                 .values(state.throughput)
                 .labels({"-9", "-8", "-7", "-6", "-5", "-4", "-3", "-2", "-1", "Now"})
+                .style(state.chartStyle)
                 .transition(chartTransition())
                 .build();
+
+            button(ui, "charts.line.style", lineW - 116.0f, 16.0f, 96.0f, 30.0f,
+                   chartStyleText(), 0xF1FC, false, [] {
+                       nextChartStyle();
+                   });
         })
         .build();
 
@@ -490,7 +542,7 @@ void composeCharts(eui::Ui& ui, float x, float y, float width) {
         .y(y)
         .size(sideW, h)
         .content([&] {
-            components::barchart(ui, "charts.bar")
+            components::barChart(ui, "charts.bar")
                 .theme(themeTokens())
                 .size(sideW, h)
                 .title("Bytes")
@@ -507,7 +559,7 @@ void composeCharts(eui::Ui& ui, float x, float y, float width) {
         .y(y)
         .size(sideW, h)
         .content([&] {
-            components::piechart(ui, "charts.pie")
+            components::pieChart(ui, "charts.pie")
                 .theme(themeTokens())
                 .size(sideW, h)
                 .title("Mix")
@@ -552,7 +604,7 @@ void composeTransmit(eui::Ui& ui, float x, float y, float width, float height) {
                 .size(112.0f, 28.0f)
                 .trackSize(36.0f, 20.0f)
                 .fontSize(11.0f)
-                .label("Auto RX")
+                .text("Auto RX")
                 .checked(state.autoReceive)
                 .onChange([](bool value) {
                     state.autoReceive = value;

@@ -2,6 +2,7 @@
 
 #include "eui/app.h"
 #include "core/app/app_runner.h"
+#include "core/app/frame_pacing.h"
 #include "core/input/input_state.h"
 #include "core/render/render_backend.h"
 #include "core/render/render_surface.h"
@@ -40,10 +41,12 @@ public:
                   SetTitleFn&& setTitle,
                   ChildAnimatingFn&& childAnimating) {
         runner_.updateFrameInterval(refreshRate, now);
-        const bool externalReady = runner_.consumeExternalReady();
+        const bool updateRequested = runner_.consumeUpdateRequest();
+        const bool frameWakeRequested = runner_.consumeFrameRequest();
         const bool frameRequested =
-            runner_.needsRender ||
-            externalReady ||
+            runner_.paintRequested ||
+            updateRequested ||
+            frameWakeRequested ||
             runner_.anyAnimating(childAnimating()) ||
             core::hasPendingPointerInput(window, metrics.pointerScale);
         while (frameRequested) {
@@ -51,7 +54,7 @@ public:
             if (remaining <= 0.0) {
                 break;
             }
-            std::this_thread::sleep_for(std::chrono::duration<double>(remaining));
+            app::detail::waitForFrameDuration(remaining);
         }
 
         const double frameTime = core::window::timeSeconds();
@@ -61,17 +64,17 @@ public:
                         renderBackend,
                         metrics,
                         deltaSeconds,
-                        externalReady,
+                        updateRequested,
                         inputEnabled,
                         std::forward<AfterUpdateFn>(afterUpdate));
 
-        updateChildren(deltaSeconds, externalReady);
+        updateChildren(deltaSeconds, updateRequested);
         runner_.updateFrameTitle(core::window::timeSeconds(), std::forward<SetTitleFn>(setTitle));
         runner_.advanceFrameClock(core::window::timeSeconds(), runner_.anyAnimating(childAnimating()));
     }
 
     void markUnavailableFrame(double now) {
-        runner_.needsRender = true;
+        runner_.paintRequested = true;
         runner_.resetTiming(now);
     }
 
@@ -80,11 +83,11 @@ public:
                          core::render::RenderBackend& renderBackend,
                          const MainWindowMetrics& metrics,
                          float deltaSeconds,
-                         bool externalReady,
+                         bool updateRequested,
                          bool inputEnabled,
                          AfterUpdateFn&& afterUpdate) {
         if (!metrics.valid()) {
-            runner_.needsRender = true;
+            runner_.paintRequested = true;
             return false;
         }
 
@@ -95,14 +98,14 @@ public:
                         metrics.framebufferHeight,
                         metrics.dpiScale,
                         metrics.pointerScale,
-                        externalReady,
+                        updateRequested,
                         inputEnabled)) {
-            runner_.needsRender = true;
+            runner_.paintRequested = true;
         }
 
         afterUpdate();
 
-        if (!runner_.needsRender) {
+        if (!runner_.paintRequested) {
             return false;
         }
 
@@ -117,6 +120,8 @@ public:
         core::render::ScopedRenderBackend scopedRenderBackend(renderBackend);
         app::render(metrics.framebufferWidth, metrics.framebufferHeight, metrics.dpiScale);
         renderBackend.present();
+        core::render::publishRenderFrameStats();
+        runner_.recordRenderStats(core::render::lastRenderFrameStats());
         const auto renderEnd = std::chrono::steady_clock::now();
         runner_.recordRenderDuration(std::chrono::duration<double, std::milli>(renderEnd - renderStart).count());
         runner_.markRendered();

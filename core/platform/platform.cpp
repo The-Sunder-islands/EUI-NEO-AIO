@@ -4,6 +4,7 @@
 #include "core/window/window_backend.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <cstdint>
@@ -60,6 +61,56 @@ struct TrayState {
 TrayState& trayState() {
     static TrayState state;
     return state;
+}
+
+std::atomic<bool>& frameRequested() {
+    static std::atomic<bool> requested{false};
+    return requested;
+}
+
+std::atomic<bool>& uiUpdateRequested() {
+    static std::atomic<bool> requested{false};
+    return requested;
+}
+
+std::filesystem::path executableDirectory() {
+#if defined(_WIN32)
+    std::vector<char> buffer(MAX_PATH);
+    DWORD length = 0;
+    while (true) {
+        length = GetModuleFileNameA(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+        if (length == 0) {
+            return {};
+        }
+        if (length < buffer.size() - 1) {
+            break;
+        }
+        buffer.resize(buffer.size() * 2);
+    }
+    return std::filesystem::path(buffer.data()).parent_path();
+#elif defined(__APPLE__)
+    std::vector<char> buffer(4096);
+    uint32_t size = static_cast<uint32_t>(buffer.size());
+    if (_NSGetExecutablePath(buffer.data(), &size) != 0) {
+        buffer.resize(size);
+        if (_NSGetExecutablePath(buffer.data(), &size) != 0) {
+            return {};
+        }
+    }
+    std::error_code error;
+    return std::filesystem::absolute(std::filesystem::path(buffer.data()), error).parent_path();
+#elif defined(__linux__)
+    std::vector<char> buffer(4096);
+    const ssize_t length = readlink("/proc/self/exe", buffer.data(), buffer.size() - 1);
+    if (length <= 0) {
+        return {};
+    }
+    buffer[static_cast<std::size_t>(length)] = '\0';
+    std::error_code error;
+    return std::filesystem::absolute(std::filesystem::path(buffer.data()), error).parent_path();
+#else
+    return {};
+#endif
 }
 
 std::string joinExtensions(const std::vector<std::string>& extensions, const std::string& separator) {
@@ -522,6 +573,23 @@ std::filesystem::path resolveIconPath(const std::string& iconPath) {
 
 } // namespace
 
+bool repairCurrentWorkingDirectory() {
+    std::error_code error;
+    (void)std::filesystem::current_path(error);
+    if (!error) {
+        return true;
+    }
+
+    const std::filesystem::path fallback = executableDirectory();
+    if (fallback.empty()) {
+        return false;
+    }
+
+    error.clear();
+    std::filesystem::current_path(fallback, error);
+    return !error;
+}
+
 bool openUrl(const std::string& url) {
     if (url.empty()) {
         return false;
@@ -652,6 +720,24 @@ void shutdownTray() {
 
 void setImeCursorRect(window::Handle window, float x, float y, float width, float height) {
     core::window::setImeCursorRect(window, x, y, width, height);
+}
+
+void requestFrame() {
+    frameRequested().store(true);
+    window::postEmptyEvent();
+}
+
+void requestUiUpdate() {
+    uiUpdateRequested().store(true);
+    requestFrame();
+}
+
+bool consumeUiUpdate() {
+    return uiUpdateRequested().exchange(false);
+}
+
+bool consumeFrameRequest() {
+    return frameRequested().exchange(false);
 }
 
 } // namespace core::platform

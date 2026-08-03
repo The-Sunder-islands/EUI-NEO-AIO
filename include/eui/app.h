@@ -30,15 +30,19 @@ int initialWindowHeight();
 bool trayEnabled();
 const char* trayTitle();
 const char* trayIconPath();
+void requestUpdate();
 bool initialize(eui::window::Handle window);
 bool update(eui::window::Handle window, float deltaSeconds, int windowWidth, int windowHeight, float dpiScale, float pointerScale);
-bool update(eui::window::Handle window, float deltaSeconds, int windowWidth, int windowHeight, float dpiScale, float pointerScale, bool externalReady);
-bool update(eui::window::Handle window, float deltaSeconds, int windowWidth, int windowHeight, float dpiScale, float pointerScale, bool externalReady, bool inputEnabled);
+bool update(eui::window::Handle window, float deltaSeconds, int windowWidth, int windowHeight, float dpiScale, float pointerScale, bool updateRequested);
+bool update(eui::window::Handle window, float deltaSeconds, int windowWidth, int windowHeight, float dpiScale, float pointerScale, bool updateRequested, bool inputEnabled);
 bool isAnimating();
 void render(int windowWidth, int windowHeight, float dpiScale);
 void releaseGraphicsResources();
 void shutdown();
-void invalidateCompose();
 std::vector<DslWindowRequest> consumeWindowRequests();
+
+namespace detail {
+void requestFullPaint();
+}
 
 } // namespace app

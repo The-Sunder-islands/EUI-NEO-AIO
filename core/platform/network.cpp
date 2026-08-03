@@ -1,6 +1,6 @@
 #include "core/platform/network.h"
-#include "core/window/window_backend.h"
 #include "core/platform/async.h"
+#include "core/platform/platform.h"
 
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
@@ -17,7 +17,6 @@
 #include <curl/curl.h>
 #endif
 
-#include <atomic>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -37,7 +36,6 @@ struct TextState {
 
 std::mutex gTextMutex;
 std::unordered_map<std::string, TextState> gTextRequests;
-std::atomic<bool> gAnyTextReady{false};
 
 #if defined(EUI_HAS_CURL)
 struct CurlCancelContext {
@@ -246,7 +244,7 @@ void requestText(const std::string& key, const std::string& url) {
                 state.ok = result.ok;
                 state.body = result.ok ? result.value : std::string{};
             }
-            gAnyTextReady.store(true);
+            platform::requestUiUpdate();
         });
 }
 
@@ -257,14 +255,6 @@ TextResult textResult(const std::string& key) {
         return {};
     }
     return {it->second.ready, it->second.ok, it->second.body};
-}
-
-bool consumeAnyTextReady() {
-    return gAnyTextReady.exchange(false);
-}
-
-void postNetworkReadyEvent() {
-    window::postEmptyEvent();
 }
 
 void shutdown() {

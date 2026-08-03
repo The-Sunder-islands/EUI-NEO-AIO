@@ -3,8 +3,10 @@
 #include "components/theme.h"
 #include "components/input_model.h"
 #include "core/dsl.h"
+#include "eui/signal.h"
 
 #include <algorithm>
+#include <cmath>
 #include <functional>
 #include <string>
 #include <utility>
@@ -12,13 +14,11 @@
 namespace components {
 
 struct InputStyle {
-    InputStyle() : InputStyle(theme::DarkThemeColors()) {}
+    InputStyle() : InputStyle(theme::dark()) {}
 
     explicit InputStyle(const theme::ThemeColorTokens& tokens) {
         background = tokens.surface;
-        hover = tokens.surfaceHover;
         focused = theme::resolveFieldFill(tokens, tokens.surface, 0.20f, 0.70f);
-        pressed = tokens.surfaceActive;
         border = theme::withOpacity(tokens.border, 0.78f);
         focusBorder = theme::withAlpha(tokens.primary, 0.86f);
         text = tokens.text;
@@ -28,9 +28,7 @@ struct InputStyle {
     }
 
     core::Color background;
-    core::Color hover;
     core::Color focused;
-    core::Color pressed;
     core::Color border;
     core::Color focusBorder;
     core::Color text;
@@ -46,8 +44,12 @@ public:
         : ui_(ui), id_(std::move(id)) {}
 
     InputBuilder& size(float width, float height) { width_ = width; height_ = height; return *this; }
-    InputBuilder& text(std::string value) { text_ = std::move(value); return *this; }
-    InputBuilder& value(std::string value) { return text(std::move(value)); }
+    InputBuilder& value(std::string value) { text_ = std::move(value); return *this; }
+    InputBuilder& bind(eui::Signal<std::string>& signal) {
+        value(signal.get());
+        onChange([&signal](const std::string& value) { signal.set(value); });
+        return *this;
+    }
     InputBuilder& placeholder(std::string value) { placeholder_ = std::move(value); return *this; }
     InputBuilder& multiline(bool value = true) { multiline_ = value; return *this; }
     InputBuilder& fontSize(float value) { fontSize_ = std::max(1.0f, value); return *this; }
@@ -105,26 +107,42 @@ public:
         state.selectionEnd = InputModel::clampUtf8Boundary(state.text, state.selectionEnd);
         const InputLayout layout = InputLayout::build(state, textWidth, textHeight, width_, inset_, textY, textLineHeight, fontFamily_, fontSize_, multiline_);
         const bool empty = state.text.empty();
+        const bool hasComposition = focused && !state.compositionText.empty();
         const bool hasSelection = !layout.selectionRects.empty();
         const std::string textDirtyKey = id_ + ".text|" + std::to_string(state.textRevision) + (empty ? "|p" : "|v");
+        const std::string compositionDirtyKey = id_ + ".composition|" + std::to_string(state.compositionRevision);
         const float renderedTextHeight = multiline_ ? layout.contentHeight : textHeight;
+        const float compositionPadding = 1.0f;
+        const float compositionTextLeft = inset_;
+        const float compositionTextRight = std::max(compositionTextLeft, width_ - inset_);
+        const float compositionAvailableWidth = std::max(4.0f, compositionTextRight - compositionTextLeft);
+        const float compositionTextWidth = hasComposition
+            ? InputModel::measureMetrics(state.compositionText, fontFamily_, fontSize_).width
+            : 0.0f;
+        const float compositionWidth = hasComposition
+            ? std::clamp(std::ceil(compositionTextWidth) + compositionPadding * 2.0f, 2.0f, compositionAvailableWidth)
+            : 0.0f;
+        const float compositionX = hasComposition
+            ? std::clamp(layout.clampedCursorX(), compositionTextLeft, std::max(compositionTextLeft, compositionTextRight - compositionWidth))
+            : layout.clampedCursorX();
+        const float caretX = hasComposition
+            ? std::clamp(compositionX + compositionWidth, inset_, std::max(inset_, width_ - inset_))
+            : layout.clampedCursorX();
 
         ui_.stack(id_)
             .size(width_, height_)
             .clip()
             .dirtyKey(InputModel::makeDirtyKey(state, focused, layout))
             .content([&] {
-                ui_.rect(hitId)
+                auto hit = ui_.rect(hitId)
                     .size(width_, height_)
-                    .states(style_.background,
-                            style_.background,
-                            style_.background)
+                    .color(style_.background)
                     .radius(style_.radius)
                     .border(1.0f, focused ? style_.focusBorder : style_.border)
                     .shadow(focused ? style_.shadow : core::Shadow{})
                     .transition(transition_)
                     .focusable()
-                    .imeRect(layout.clampedCursorX(), layout.cursorY, 1.5f, textLineHeight)
+                    .imeRect(caretX, layout.cursorY, 1.5f, textLineHeight)
                     .onPress([&state, width, inset, layout](const core::PointerEvent& event, const core::Rect& bounds) {
                         state.lastBounds = bounds;
                         state.cursor = InputModel::clampUtf8Boundary(state.text, layout.cursorFromPointer(event.x, event.y, bounds, width, inset));
@@ -144,21 +162,29 @@ public:
                         } else {
                             InputModel::syncScroll(state, std::max(0.0f, width - inset * 2.0f), fontFamily, fontSize);
                         }
-                    })
-                    .onScroll([&state, allowMultiline, layout, fontSize](const core::ScrollEvent& event) {
-                        if (!allowMultiline || layout.maxVerticalScroll <= 0.0f) {
-                            return;
-                        }
+                    });
+                if (allowMultiline && layout.maxVerticalScroll > 0.0f) {
+                    hit.onScroll([&state, layout, fontSize](const core::ScrollEvent& event) {
                         const float step = std::max(12.0f, fontSize * 2.2f);
                         state.verticalScroll = std::clamp(
                             state.verticalScroll - static_cast<float>(event.y) * step,
                             0.0f,
                             layout.maxVerticalScroll);
-                    })
-                    .onTextInput([&state, allowMultiline, onChange, onEnter, width, inset, fontSize, fontFamily, textHeight](const core::KeyboardEvent& event) {
+                    });
+                }
+                hit.onTextInput([&state, allowMultiline, onChange, onEnter, width, inset, fontSize, fontFamily, textHeight](const core::KeyboardEvent& event) {
                         bool changed = false;
+                        const std::string nextComposition = event.composing ? InputModel::filteredText(event.compositionText, allowMultiline) : std::string{};
+                        if (state.compositionText != nextComposition) {
+                            state.compositionText = nextComposition;
+                            ++state.compositionRevision;
+                        }
 
                         if (event.undo || event.redo) {
+                            if (!state.compositionText.empty()) {
+                                state.compositionText.clear();
+                                ++state.compositionRevision;
+                            }
                             changed = event.undo ? InputModel::undoEdit(state) : InputModel::redoEdit(state);
                             if (allowMultiline) {
                                 state.horizontalScroll = 0.0f;
@@ -252,11 +278,19 @@ public:
                             }
                         }
                         if (!event.text.empty()) {
+                            if (!state.compositionText.empty()) {
+                                state.compositionText.clear();
+                                ++state.compositionRevision;
+                            }
                             InputModel::pushUndoState(state);
                             InputModel::insertAtCursor(state, InputModel::filteredText(event.text, allowMultiline));
                             changed = true;
                         }
                         if (!event.pasteText.empty()) {
+                            if (!state.compositionText.empty()) {
+                                state.compositionText.clear();
+                                ++state.compositionRevision;
+                            }
                             InputModel::pushUndoState(state);
                             InputModel::insertAtCursor(state, InputModel::filteredText(event.pasteText, allowMultiline));
                             changed = true;
@@ -309,9 +343,31 @@ public:
                     .verticalAlign(core::VerticalAlign::Top)
                     .build();
 
+                if (hasComposition) {
+                    ui_.rect(id_ + ".composition.bg")
+                        .position(compositionX, layout.cursorY)
+                        .size(compositionWidth, textLineHeight)
+                        .color(theme::withAlpha(style_.focused, 0.82f))
+                        .radius(2.0f)
+                        .build();
+
+                    ui_.text(id_ + ".composition")
+                        .position(compositionX + compositionPadding, layout.cursorY)
+                        .size(std::max(1.0f, compositionWidth - compositionPadding * 2.0f), textLineHeight)
+                        .dirtyKey(compositionDirtyKey)
+                        .text(state.compositionText)
+                        .fontSize(fontSize_)
+                        .fontFamily(fontFamily_)
+                        .lineHeight(textLineHeight)
+                        .color(style_.text)
+                        .wrap(false)
+                        .verticalAlign(core::VerticalAlign::Top)
+                        .build();
+                }
+
                 if (focused) {
                     ui_.rect(id_ + ".cursor")
-                        .position(layout.clampedCursorX(), layout.cursorY)
+                        .position(caretX, layout.cursorY)
                         .size(1.5f, fontSize_ * 1.18f)
                         .color(style_.cursor)
                         .radius(1.0f)

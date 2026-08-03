@@ -12,14 +12,14 @@ class DslWindowRuntime {
 public:
     bool initialize(core::window::Handle window, DslWindowRequest request) {
         request_ = std::move(request);
-        needsRender_ = true;
+        paintRequested_ = true;
         return runtime_.initialize(window);
     }
 
     void shutdown(bool releaseCachedImageTextures = false) {
         runtime_.shutdown(releaseCachedImageTextures);
         composed_ = false;
-        needsRender_ = false;
+        paintRequested_ = false;
     }
 
     const DslWindowRequest& request() const {
@@ -30,12 +30,17 @@ public:
         return runtime_.isAnimating();
     }
 
-    bool needsRender() const {
-        return needsRender_;
+    bool paintRequested() const {
+        return paintRequested_;
     }
 
-    void markNeedsRender() {
-        needsRender_ = true;
+    void requestPaint() {
+        paintRequested_ = true;
+    }
+
+    void requestFullPaint() {
+        runtime_.requestFullPaint();
+        paintRequested_ = true;
     }
 
     bool update(core::window::Handle window,
@@ -44,7 +49,7 @@ public:
                 float logicalHeight,
                 float pointerScale,
                 float dpiScale,
-                bool externalReady,
+                bool updateRequested,
                 bool inputEnabled = true) {
         bool changed = false;
         const auto composeFrame = [&] {
@@ -57,24 +62,24 @@ public:
             logicalHeight_ = logicalHeight;
         };
 
-        if (!composed_ || logicalWidth_ != logicalWidth || logicalHeight_ != logicalHeight || externalReady) {
+        const bool needsInitialOrResizeCompose = !composed_ || logicalWidth_ != logicalWidth || logicalHeight_ != logicalHeight;
+        if (needsInitialOrResizeCompose || updateRequested) {
             composeFrame();
-            runtime_.markFullRedraw();
-            needsRender_ = true;
+            paintRequested_ = true;
             changed = true;
         }
 
         if (runtime_.update(window, deltaSeconds, pointerScale, dpiScale, inputEnabled)) {
-            needsRender_ = true;
+            paintRequested_ = true;
             changed = true;
         }
 
-        if (runtime_.needsCompose()) {
+        if (runtime_.composeRequested()) {
             composeFrame();
             if (runtime_.update(window, 0.0f, pointerScale, dpiScale, inputEnabled)) {
                 changed = true;
             }
-            needsRender_ = true;
+            paintRequested_ = true;
             changed = true;
         }
 
@@ -84,14 +89,14 @@ public:
     void render(core::render::RenderBackend& renderBackend, int framebufferWidth, int framebufferHeight, float dpiScale) {
         core::render::ScopedRenderBackend scopedRenderBackend(renderBackend);
         runtime_.render(framebufferWidth, framebufferHeight, dpiScale, request_.clearColor);
-        needsRender_ = false;
+        paintRequested_ = runtime_.paintRequested();
     }
 
 private:
     core::dsl::Runtime runtime_;
     DslWindowRequest request_;
     bool composed_ = false;
-    bool needsRender_ = true;
+    bool paintRequested_ = true;
     float logicalWidth_ = 0.0f;
     float logicalHeight_ = 0.0f;
 };

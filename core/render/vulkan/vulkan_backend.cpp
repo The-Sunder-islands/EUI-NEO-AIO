@@ -79,6 +79,14 @@ VkPresentModeKHR choosePresentMode(const std::vector<VkPresentModeKHR>& modes) {
     return VK_PRESENT_MODE_FIFO_KHR;
 }
 
+bool platformSupportsIncrementalPresent() {
+#if defined(__APPLE__)
+    return false;
+#else
+    return true;
+#endif
+}
+
 } // namespace
 
 void VulkanRenderBackend::writeColor(float (&target)[4], const core::Color& color) {
@@ -146,6 +154,7 @@ void VulkanRenderBackend::transitionImageLayout(VkCommandBuffer commandBuffer,
     if (image == VK_NULL_HANDLE || oldLayout == newLayout) {
         return;
     }
+    ++core::render::currentRenderFrameStats().backendBarriers;
 
     VkImageMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -174,7 +183,7 @@ void VulkanRenderBackend::transitionImageLayout(VkCommandBuffer commandBuffer,
                          &barrier);
 }
 
-VkRect2D VulkanRenderBackend::clampScissor(const core::Rect& rect, int windowWidth, int windowHeight) {
+VkRect2D VulkanRenderBackend::clampScissor(const core::Rect& rect, int windowWidth, int windowHeight) const {
     const float maxWidth = static_cast<float>(std::max(0, windowWidth));
     const float maxHeight = static_cast<float>(std::max(0, windowHeight));
     const float left = std::clamp(std::floor(rect.x), 0.0f, maxWidth);
@@ -319,10 +328,12 @@ void VulkanRenderBackend::beginFrame(const RenderSurface& surface) {
     frameActive_ = true;
     frameRecorded_ = false;
     renderPassActive_ = false;
+    renderTarget_ = RenderTarget::Swapchain;
     renderingToCache_ = false;
+    activeLayer_ = nullptr;
     backdropReady_ = false;
     primitiveVertices_.used = 0;
-    canvasVertices_.used = 0;
+    polygonEdges_.used = 0;
     textVertices_.used = 0;
     imageVertices_.used = 0;
 }
@@ -331,6 +342,8 @@ void VulkanRenderBackend::present() {
     if (!frameActive_) {
         return;
     }
+    core::render::RenderFrameStats& stats = core::render::currentRenderFrameStats();
+    stats.backendIncrementalPresentSupported = incrementalPresentSupported_ ? 1 : 0;
     if (!frameRecorded_) {
         recordClearPass(clearColor_);
     }
@@ -359,6 +372,7 @@ void VulkanRenderBackend::present() {
         renderPassActive_ = false;
         return;
     }
+    ++core::render::currentRenderFrameStats().backendSubmits;
 
     VkPresentInfoKHR presentInfo{};
     presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -367,7 +381,44 @@ void VulkanRenderBackend::present() {
     presentInfo.swapchainCount = 1;
     presentInfo.pSwapchains = &swapchain_;
     presentInfo.pImageIndices = &currentImage_;
+    std::vector<VkRectLayerKHR> presentRects;
+    VkPresentRegionKHR presentRegion{};
+    VkPresentRegionsKHR presentRegions{};
+    if (incrementalPresentSupported_ && !presentDirtyRects_.empty()) {
+        presentRects.reserve(presentDirtyRects_.size());
+        for (const core::Rect& rect : presentDirtyRects_) {
+            const VkRect2D vkRect = clampScissor(rect,
+                                                 static_cast<int>(swapchainExtent_.width),
+                                                 static_cast<int>(swapchainExtent_.height));
+            if (vkRect.extent.width == 0 || vkRect.extent.height == 0) {
+                continue;
+            }
+            presentRects.push_back({vkRect.offset, vkRect.extent, 0});
+        }
+        if (!presentRects.empty()) {
+            presentRegion.rectangleCount = static_cast<std::uint32_t>(presentRects.size());
+            presentRegion.pRectangles = presentRects.data();
+            presentRegions.sType = VK_STRUCTURE_TYPE_PRESENT_REGIONS_KHR;
+            presentRegions.swapchainCount = 1;
+            presentRegions.pRegions = &presentRegion;
+            presentInfo.pNext = &presentRegions;
+            ++stats.backendIncrementalPresents;
+        }
+    }
+    if (!presentRects.empty()) {
+        std::uint64_t presentPixels = 0;
+        for (const VkRectLayerKHR& rect : presentRects) {
+            presentPixels += static_cast<std::uint64_t>(rect.extent.width) *
+                             static_cast<std::uint64_t>(rect.extent.height);
+        }
+        stats.backendPresentPixels += presentPixels;
+    } else {
+        stats.backendPresentPixels += static_cast<std::uint64_t>(swapchainExtent_.width) *
+                                      static_cast<std::uint64_t>(swapchainExtent_.height);
+    }
     const VkResult presentResult = vkQueuePresentKHR(presentQueue_, &presentInfo);
+    ++stats.backendPresents;
+    presentDirtyRects_.clear();
     if (presentResult == VK_ERROR_OUT_OF_DATE_KHR || presentResult == VK_SUBOPTIMAL_KHR) {
         swapchainExtent_ = {};
     }
@@ -446,12 +497,10 @@ bool VulkanRenderBackend::createInstance() {
 
     VkInstanceCreateFlags flags = 0;
     const std::vector<VkExtensionProperties> availableExtensions = instanceExtensions();
-#ifdef VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME
     if (hasExtension(availableExtensions, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME)) {
         addUniqueExtension(extensions, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
         flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
     }
-#endif
     if (hasExtension(availableExtensions, VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME)) {
         addUniqueExtension(extensions, VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
     }
@@ -517,8 +566,13 @@ bool VulkanRenderBackend::createDevice() {
     queueInfo.queueCount = 1;
     queueInfo.pQueuePriorities = &priority;
 
-    std::vector<const char*> extensions{VK_KHR_SWAPCHAIN_EXTENSION_NAME};
     const std::vector<VkExtensionProperties> availableExtensions = deviceExtensions(physicalDevice_);
+    std::vector<const char*> extensions{VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+    const bool enableIncrementalPresent = platformSupportsIncrementalPresent() &&
+                                          hasExtension(availableExtensions, VK_KHR_INCREMENTAL_PRESENT_EXTENSION_NAME);
+    if (enableIncrementalPresent) {
+        extensions.push_back(VK_KHR_INCREMENTAL_PRESENT_EXTENSION_NAME);
+    }
     if (hasExtension(availableExtensions, "VK_KHR_portability_subset")) {
         extensions.push_back("VK_KHR_portability_subset");
     }
@@ -534,6 +588,7 @@ bool VulkanRenderBackend::createDevice() {
     }
     vkGetDeviceQueue(device_, graphicsFamily_, 0, &graphicsQueue_);
     presentQueue_ = graphicsQueue_;
+    incrementalPresentSupported_ = enableIncrementalPresent;
     return true;
 }
 
@@ -609,6 +664,7 @@ bool VulkanRenderBackend::recreateSwapchain(const RenderSurface& surface) {
     swapchainImages_.resize(imageCount);
     vkGetSwapchainImagesKHR(device_, swapchain_, &imageCount, swapchainImages_.data());
     swapchainImageLayouts_.assign(swapchainImages_.size(), VK_IMAGE_LAYOUT_UNDEFINED);
+    swapchainImageCacheGenerations_.assign(swapchainImages_.size(), 0);
 
     swapchainImageViews_.resize(swapchainImages_.size());
     for (std::size_t i = 0; i < swapchainImages_.size(); ++i) {
@@ -704,8 +760,13 @@ bool VulkanRenderBackend::recreateSwapchain(const RenderSurface& surface) {
 }
 
 void VulkanRenderBackend::recordClearPass(const core::Color& color) {
-    if (renderingToCache_) {
+    if (renderTarget_ == RenderTarget::RenderCache) {
         transitionRenderCacheImage(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    } else if (renderTarget_ == RenderTarget::Layer) {
+        if (activeLayer_ == nullptr) {
+            return;
+        }
+        transitionLayerImage(*activeLayer_, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
     } else {
         transitionSwapchainImage(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
     }
@@ -742,11 +803,17 @@ void VulkanRenderBackend::beginLoadPass() {
         return;
     }
 
-    if (renderingToCache_) {
+    if (renderTarget_ == RenderTarget::RenderCache) {
         if (renderCacheFramebuffer_ == VK_NULL_HANDLE || renderCacheExtent_.width == 0 || renderCacheExtent_.height == 0) {
             return;
         }
         transitionRenderCacheImage(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    } else if (renderTarget_ == RenderTarget::Layer) {
+        if (activeLayer_ == nullptr || activeLayer_->framebuffer == VK_NULL_HANDLE ||
+            activeLayer_->extent.width == 0 || activeLayer_->extent.height == 0) {
+            return;
+        }
+        transitionLayerImage(*activeLayer_, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
     } else {
         transitionSwapchainImage(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
     }
@@ -755,20 +822,79 @@ void VulkanRenderBackend::beginLoadPass() {
     renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     renderPassInfo.renderPass = renderPass_;
     renderPassInfo.framebuffer = currentFramebuffer();
-    renderPassInfo.renderArea.offset = {0, 0};
-    renderPassInfo.renderArea.extent = currentRenderExtent();
+    renderPassInfo.renderArea = currentRenderArea();
 
     vkCmdBeginRenderPass(commandBuffers_[currentImage_], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
     renderPassActive_ = true;
     frameRecorded_ = true;
+    core::render::RenderFrameStats& stats = core::render::currentRenderFrameStats();
+    ++stats.backendRenderPasses;
+    stats.backendRenderPassPixels += static_cast<std::uint64_t>(renderPassInfo.renderArea.extent.width) *
+                                     static_cast<std::uint64_t>(renderPassInfo.renderArea.extent.height);
 }
 
 VkExtent2D VulkanRenderBackend::currentRenderExtent() const {
-    return renderingToCache_ ? renderCacheExtent_ : swapchainExtent_;
+    if (renderTarget_ == RenderTarget::RenderCache) {
+        return renderCacheExtent_;
+    }
+    if (renderTarget_ == RenderTarget::Layer && activeLayer_ != nullptr) {
+        return activeLayer_->extent;
+    }
+    return swapchainExtent_;
+}
+
+VkRect2D VulkanRenderBackend::currentRenderArea() const {
+    const VkExtent2D extent = currentRenderExtent();
+    if (renderTarget_ == RenderTarget::RenderCache && cacheRenderArea_.width > 0.0f && cacheRenderArea_.height > 0.0f) {
+        return clampScissor(cacheRenderArea_, static_cast<int>(extent.width), static_cast<int>(extent.height));
+    }
+    return {{0, 0}, extent};
 }
 
 VkFramebuffer VulkanRenderBackend::currentFramebuffer() const {
-    return renderingToCache_ ? renderCacheFramebuffer_ : framebuffers_[currentImage_];
+    if (renderTarget_ == RenderTarget::RenderCache) {
+        return renderCacheFramebuffer_;
+    }
+    if (renderTarget_ == RenderTarget::Layer && activeLayer_ != nullptr) {
+        return activeLayer_->framebuffer;
+    }
+    return framebuffers_[currentImage_];
+}
+
+VkImage VulkanRenderBackend::currentRenderImage() const {
+    if (renderTarget_ == RenderTarget::RenderCache) {
+        return renderCacheImage_;
+    }
+    if (renderTarget_ == RenderTarget::Layer && activeLayer_ != nullptr) {
+        return activeLayer_->texture.image;
+    }
+    if (currentImage_ < swapchainImages_.size()) {
+        return swapchainImages_[currentImage_];
+    }
+    return VK_NULL_HANDLE;
+}
+
+VkImageLayout VulkanRenderBackend::currentRenderImageLayout() const {
+    if (renderTarget_ == RenderTarget::RenderCache) {
+        return renderCacheLayout_;
+    }
+    if (renderTarget_ == RenderTarget::Layer && activeLayer_ != nullptr) {
+        return activeLayer_->texture.layout;
+    }
+    if (currentImage_ < swapchainImageLayouts_.size()) {
+        return swapchainImageLayouts_[currentImage_];
+    }
+    return VK_IMAGE_LAYOUT_UNDEFINED;
+}
+
+void VulkanRenderBackend::setCurrentRenderImageLayout(VkImageLayout layout) {
+    if (renderTarget_ == RenderTarget::RenderCache) {
+        renderCacheLayout_ = layout;
+    } else if (renderTarget_ == RenderTarget::Layer && activeLayer_ != nullptr) {
+        activeLayer_->texture.layout = layout;
+    } else if (currentImage_ < swapchainImageLayouts_.size()) {
+        swapchainImageLayouts_[currentImage_] = layout;
+    }
 }
 
 void VulkanRenderBackend::destroySwapchain() {
@@ -778,13 +904,16 @@ void VulkanRenderBackend::destroySwapchain() {
     frameActive_ = false;
     frameRecorded_ = false;
     renderPassActive_ = false;
+    renderTarget_ = RenderTarget::Swapchain;
     destroyRoundedRectPipeline();
+    destroyPolygonPipeline();
     destroyCanvasPipeline();
     destroyBackdropResources();
     destroyTextPipeline();
     destroyTextResources();
     destroyImagePipeline();
     destroyImageResources();
+    releaseAllLayerFramebuffers();
     destroyRenderCacheResolvePipeline();
     destroyRenderCacheResources();
     releasePendingTextureDeletes();
@@ -824,10 +953,12 @@ void VulkanRenderBackend::destroySwapchain() {
     commandBuffers_.clear();
     swapchainImages_.clear();
     swapchainImageLayouts_.clear();
+    swapchainImageCacheGenerations_.clear();
     swapchainTransferSrcSupported_ = false;
     swapchainTransferDstSupported_ = false;
     backdropReady_ = false;
     renderingToCache_ = false;
+    activeLayer_ = nullptr;
 }
 
 void VulkanRenderBackend::destroy() {
@@ -835,7 +966,13 @@ void VulkanRenderBackend::destroy() {
         vkDeviceWaitIdle(device_);
     }
     destroySwapchain();
+    releaseAllLayerResources();
+    for (LayerResource* layer : layers_) {
+        delete layer;
+    }
+    layers_.clear();
     destroyPrimitiveVertexBuffer();
+    destroyPolygonEdgeBuffer();
     for (VkDescriptorPool pool : imageDescriptorPools_) {
         if (pool != VK_NULL_HANDLE) {
             vkDestroyDescriptorPool(device_, pool, nullptr);
@@ -893,6 +1030,175 @@ void VulkanRenderBackend::destroyTextureResource(TextureResource& texture) {
         texture.memory = VK_NULL_HANDLE;
     }
     texture = {};
+}
+
+bool VulkanRenderBackend::createTargetImage(TextureResource& texture,
+                                            int width,
+                                            int height,
+                                            VkFormat format,
+                                            VkImageUsageFlags usage) {
+    if (device_ == VK_NULL_HANDLE || width <= 0 || height <= 0 || format == VK_FORMAT_UNDEFINED) {
+        return false;
+    }
+
+    VkImageCreateInfo imageInfo{};
+    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    imageInfo.imageType = VK_IMAGE_TYPE_2D;
+    imageInfo.extent = {static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(height), 1};
+    imageInfo.mipLevels = 1;
+    imageInfo.arrayLayers = 1;
+    imageInfo.format = format;
+    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    imageInfo.usage = usage;
+    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    if (vkCreateImage(device_, &imageInfo, nullptr, &texture.image) != VK_SUCCESS) {
+        destroyTextureResource(texture);
+        return false;
+    }
+
+    VkMemoryRequirements memoryRequirements{};
+    vkGetImageMemoryRequirements(device_, texture.image, &memoryRequirements);
+    VkMemoryAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocInfo.allocationSize = memoryRequirements.size;
+    allocInfo.memoryTypeIndex = findMemoryType(memoryRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    if (allocInfo.memoryTypeIndex == std::numeric_limits<std::uint32_t>::max() ||
+        vkAllocateMemory(device_, &allocInfo, nullptr, &texture.memory) != VK_SUCCESS ||
+        vkBindImageMemory(device_, texture.image, texture.memory, 0) != VK_SUCCESS) {
+        destroyTextureResource(texture);
+        return false;
+    }
+
+    VkImageViewCreateInfo viewInfo{};
+    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    viewInfo.image = texture.image;
+    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    viewInfo.format = format;
+    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    viewInfo.subresourceRange.levelCount = 1;
+    viewInfo.subresourceRange.layerCount = 1;
+    if (vkCreateImageView(device_, &viewInfo, nullptr, &texture.view) != VK_SUCCESS) {
+        destroyTextureResource(texture);
+        return false;
+    }
+
+    texture.width = width;
+    texture.height = height;
+    texture.channels = 4;
+    texture.format = format;
+    texture.layout = VK_IMAGE_LAYOUT_UNDEFINED;
+    ++texture.generation;
+    return true;
+}
+
+bool VulkanRenderBackend::ensureTextureSampler(TextureResource& texture) {
+    if (texture.sampler != VK_NULL_HANDLE) {
+        return true;
+    }
+    if (device_ == VK_NULL_HANDLE) {
+        return false;
+    }
+
+    VkSamplerCreateInfo samplerInfo{};
+    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    samplerInfo.magFilter = VK_FILTER_LINEAR;
+    samplerInfo.minFilter = VK_FILTER_LINEAR;
+    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.maxLod = 1.0f;
+    return vkCreateSampler(device_, &samplerInfo, nullptr, &texture.sampler) == VK_SUCCESS;
+}
+
+bool VulkanRenderBackend::ensureLayerResource(LayerResource& layer, int width, int height) {
+    if (width <= 0 || height <= 0 || renderPass_ == VK_NULL_HANDLE || swapchainFormat_ == VK_FORMAT_UNDEFINED) {
+        return false;
+    }
+    const auto targetWidth = static_cast<std::uint32_t>(width);
+    const auto targetHeight = static_cast<std::uint32_t>(height);
+    const bool textureMatches = layer.texture.image != VK_NULL_HANDLE &&
+                                layer.texture.view != VK_NULL_HANDLE &&
+                                layer.texture.width == width &&
+                                layer.texture.height == height &&
+                                layer.texture.format == swapchainFormat_;
+    if (!textureMatches) {
+        destroyLayerResource(layer);
+    }
+
+    if (layer.texture.image == VK_NULL_HANDLE) {
+        const VkImageUsageFlags usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                                        VK_IMAGE_USAGE_SAMPLED_BIT |
+                                        VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                        VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        if (!createTargetImage(layer.texture, width, height, swapchainFormat_, usage)) {
+            destroyLayerResource(layer);
+            return false;
+        }
+    }
+    if (!ensureTextureSampler(layer.texture)) {
+        destroyLayerResource(layer);
+        return false;
+    }
+    if (layer.framebuffer != VK_NULL_HANDLE &&
+        layer.extent.width == targetWidth &&
+        layer.extent.height == targetHeight) {
+        return true;
+    }
+    if (layer.framebuffer != VK_NULL_HANDLE) {
+        vkDestroyFramebuffer(device_, layer.framebuffer, nullptr);
+        layer.framebuffer = VK_NULL_HANDLE;
+    }
+
+    VkImageView attachments[] = {layer.texture.view};
+    VkFramebufferCreateInfo framebufferInfo{};
+    framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+    framebufferInfo.renderPass = renderPass_;
+    framebufferInfo.attachmentCount = 1;
+    framebufferInfo.pAttachments = attachments;
+    framebufferInfo.width = targetWidth;
+    framebufferInfo.height = targetHeight;
+    framebufferInfo.layers = 1;
+    if (vkCreateFramebuffer(device_, &framebufferInfo, nullptr, &layer.framebuffer) != VK_SUCCESS) {
+        destroyLayerResource(layer);
+        return false;
+    }
+
+    layer.extent = {targetWidth, targetHeight};
+    return true;
+}
+
+void VulkanRenderBackend::destroyLayerResource(LayerResource& layer) {
+    if (device_ != VK_NULL_HANDLE && layer.framebuffer != VK_NULL_HANDLE) {
+        vkDestroyFramebuffer(device_, layer.framebuffer, nullptr);
+    }
+    layer.framebuffer = VK_NULL_HANDLE;
+    layer.extent = {};
+    destroyTextureResource(layer.texture);
+}
+
+void VulkanRenderBackend::releaseAllLayerFramebuffers() {
+    activeLayer_ = nullptr;
+    previousLayerTarget_ = RenderTarget::Swapchain;
+    for (LayerResource* layer : layers_) {
+        if (layer != nullptr && layer->framebuffer != VK_NULL_HANDLE) {
+            vkDestroyFramebuffer(device_, layer->framebuffer, nullptr);
+            layer->framebuffer = VK_NULL_HANDLE;
+            layer->extent = {};
+        }
+    }
+}
+
+void VulkanRenderBackend::releaseAllLayerResources() {
+    activeLayer_ = nullptr;
+    previousLayerTarget_ = RenderTarget::Swapchain;
+    for (LayerResource* layer : layers_) {
+        if (layer != nullptr) {
+            destroyLayerResource(*layer);
+        }
+    }
 }
 
 bool VulkanRenderBackend::createUploadBuffer(VkDeviceSize capacity) {

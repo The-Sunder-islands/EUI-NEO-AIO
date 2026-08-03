@@ -388,11 +388,15 @@ std::string resolveLocalImagePath(const std::string& source) {
     const std::filesystem::path raw(source);
     const std::filesystem::path exeDir = executableDirectory();
     const std::filesystem::path sourceRoot = sourceRootDirectory();
+    std::error_code error;
+    const std::filesystem::path currentDir = std::filesystem::current_path(error);
     std::vector<std::filesystem::path> candidates;
     candidates.emplace_back(raw);
-    candidates.emplace_back(std::filesystem::current_path() / raw);
-    candidates.emplace_back(std::filesystem::current_path() / "assets" / raw);
-    candidates.emplace_back(std::filesystem::current_path() / "assets" / raw.filename());
+    if (!error) {
+        candidates.emplace_back(currentDir / raw);
+        candidates.emplace_back(currentDir / "assets" / raw);
+        candidates.emplace_back(currentDir / "assets" / raw.filename());
+    }
     candidates.emplace_back(exeDir / raw);
     candidates.emplace_back(exeDir / "assets" / raw);
     candidates.emplace_back(exeDir / "assets" / raw.filename());
@@ -400,7 +404,6 @@ std::string resolveLocalImagePath(const std::string& source) {
     candidates.emplace_back(sourceRoot / "assets" / raw);
     candidates.emplace_back(sourceRoot / "assets" / raw.filename());
 
-    std::error_code error;
     for (const auto& candidate : candidates) {
         if (std::filesystem::exists(candidate, error) && !error) {
             return std::filesystem::absolute(candidate, error).string();

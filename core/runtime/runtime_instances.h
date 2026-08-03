@@ -7,6 +7,7 @@
 #include "core/render/text.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <utility>
@@ -61,6 +62,7 @@ struct PolygonInstance {
     SmoothedValue<float> pressBlend;
     AnimatedValue<LayoutRect> frame;
     AnimatedValue<Color> color;
+    AnimatedValue<float> radius;
     AnimatedValue<float> opacity;
     AnimatedValue<Transform> transform;
     std::vector<Vec2> points;
@@ -105,13 +107,16 @@ struct ImageInstance {
 };
 
 struct CanvasInstance {
-    std::unique_ptr<core::render::CanvasPrimitive> primitive = std::make_unique<core::render::CanvasPrimitive>();
+    std::unique_ptr<render::CanvasPrimitive> primitive = std::make_unique<render::CanvasPrimitive>();
     bool initialized = false;
     bool seen = false;
     AnimatedValue<LayoutRect> frame;
     AnimatedValue<float> opacity;
+    AnimatedValue<float> radius;
     AnimatedValue<Transform> transform;
-    std::function<void(core::render::CanvasContext&)> onDraw;
+    std::function<void(render::CanvasContext&)> onDraw;
+    int lastWindowWidth = 0;
+    int lastWindowHeight = 0;
 };
 
 struct InteractionInstance {
@@ -164,6 +169,27 @@ struct TimerInstance {
 struct FrameTargetInstance {
     LayoutRect frame;
     bool initialized = false;
+    bool seen = false;
+};
+
+struct PaintBoundsInstance {
+    Rect own;
+    Rect subtree;
+    int drawCost = 0;
+    bool hasOwn = false;
+    bool hasSubtree = false;
+    bool subtreeAnimating = false;
+    bool seen = false;
+};
+
+struct RetainedLayerInstance {
+    render::RenderBackend::LayerHandle handle = nullptr;
+    Rect bounds;
+    std::uint64_t signature = 0;
+    int width = 0;
+    int height = 0;
+    int stableFrames = 0;
+    bool valid = false;
     bool seen = false;
 };
 

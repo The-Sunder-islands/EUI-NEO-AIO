@@ -3,8 +3,8 @@
 #include "core/layout.h"
 #include "core/animation.h"
 #include "core/input/input_types.h"
-#include "core/render/image_types.h"
 #include "core/render/canvas.h"
+#include "core/render/image_types.h"
 #include "core/render/render_types.h"
 #include "core/render/text_types.h"
 
@@ -109,6 +109,7 @@ struct Element {
     float maxLayoutHeight = 0.0f;
     float flexGrow = 0.0f;
     float flexShrink = 0.0f;
+    bool ignoreLayout = false;
 
     Color color = {1.0f, 1.0f, 1.0f, 1.0f};
     Gradient gradient;
@@ -119,6 +120,8 @@ struct Element {
     float blur = 0.0f;
     float opacity = 1.0f;
     std::vector<Vec2> polygonPoints;
+
+    std::function<void(core::render::CanvasContext&)> onCanvasDraw;
 
     std::string text;
     std::string fontFamily;
@@ -138,8 +141,6 @@ struct Element {
     bool imageHasCoverViewport = false;
     Vec2 imageCoverViewportSize;
     Vec2 imageCoverViewportOffset;
-
-    std::function<void(core::render::CanvasContext&)> onDraw;
 
     bool interactive = false;
     bool focusable = false;
@@ -199,6 +200,11 @@ struct Element {
     std::string dirtyKey;
 
     std::vector<std::unique_ptr<Element>> children;
+    std::vector<const Element*> orderedChildren;
+    bool subtreeNeedsUpdate = true;
+    bool subtreeHasDependentVisuals = false;
+    bool subtreeHasBackdropBlur = false;
+    bool subtreeBlocksRetainedLayer = true;
 
     LayoutType layoutType() const {
         if (kind == ElementKind::Row) {
@@ -370,17 +376,9 @@ public:
         return self();
     }
 
-    Derived& spacing(float value) {
-        return gap(value);
-    }
-
     Derived& lineGap(float value) {
         element_->lineSpacing = std::max(0.0f, value);
         return self();
-    }
-
-    Derived& lineSpacing(float value) {
-        return lineGap(value);
     }
 
     Derived& padding(float value) {
@@ -472,22 +470,19 @@ public:
         return self();
     }
 
+    Derived& ignoreLayout(bool value = true) {
+        element_->ignoreLayout = value;
+        return self();
+    }
+
     Derived& zIndex(int value) {
         element_->zIndex = value;
         return self();
     }
 
-    Derived& z(int value) {
-        return zIndex(value);
-    }
-
     Derived& clip(bool value = true) {
         element_->clip = value;
         return self();
-    }
-
-    Derived& overflowHidden(bool value = true) {
-        return clip(value);
     }
 
     Derived& pressedScale(float value) {
@@ -522,11 +517,6 @@ public:
 
     Derived& disabled(bool value = true) {
         element_->disabled = value;
-        return self();
-    }
-
-    Derived& enabled(bool value = true) {
-        element_->disabled = !value;
         return self();
     }
 
@@ -606,10 +596,6 @@ public:
         return self();
     }
 
-    Derived& rotation(float radians) {
-        return rotate(radians);
-    }
-
     Derived& perspective(float value) {
         element_->transform.perspective = std::max(0.0f, value);
         return self();
@@ -677,7 +663,7 @@ public:
         return self();
     }
 
-    Derived& onHoverChanged(std::function<void(bool)> callback) {
+    Derived& onHover(std::function<void(bool)> callback) {
         element_->interactive = true;
         element_->onHoverChanged = std::move(callback);
         return self();
@@ -798,15 +784,6 @@ public:
         return this->self();
     }
 
-    Derived& background(const Color& value) {
-        return color(value);
-    }
-
-    Derived& background(float r, float g, float b, float a = 1.0f) {
-        this->element_->color = {r, g, b, a};
-        return this->self();
-    }
-
     Derived& gradient(const Gradient& value) {
         this->element_->gradient = value;
         return this->self();
@@ -817,13 +794,9 @@ public:
         return this->self();
     }
 
-    Derived& rounding(float value) {
+    Derived& radius(float value) {
         this->element_->radius = std::max(0.0f, value);
         return this->self();
-    }
-
-    Derived& radius(float value) {
-        return rounding(value);
     }
 
     Derived& border(float widthValue, const Color& colorValue) {
@@ -925,10 +898,6 @@ public:
     Derived& rotateZ(float radians) {
         this->element_->transform.rotate = radians;
         return this->self();
-    }
-
-    Derived& rotation(float radians) {
-        return rotate(radians);
     }
 
     Derived& perspective(float value) {
@@ -1072,6 +1041,16 @@ public:
     }
 };
 
+class CanvasBuilder : public ShapeBuilderBase<CanvasBuilder> {
+public:
+    CanvasBuilder(Ui& ui, Element* element) : ShapeBuilderBase<CanvasBuilder>(ui, element) {}
+
+    CanvasBuilder& onDraw(std::function<void(core::render::CanvasContext&)> callback) {
+        element_->onCanvasDraw = std::move(callback);
+        return *this;
+    }
+};
+
 class TextBuilder : public BuilderBase<TextBuilder> {
 public:
     TextBuilder(Ui& ui, Element* element) : BuilderBase<TextBuilder>(ui, element) {}
@@ -1084,14 +1063,6 @@ public:
     TextBuilder& fontFamily(const std::string& value) {
         element_->fontFamily = value;
         return *this;
-    }
-
-    TextBuilder& font(const std::string& value) {
-        return fontFamily(value);
-    }
-
-    TextBuilder& customFont(const std::string& value) {
-        return fontFamily(value);
     }
 
     TextBuilder& fontSize(float value) {
@@ -1162,14 +1133,6 @@ public:
         return *this;
     }
 
-    ImageBuilder& path(const std::string& value) {
-        return source(value);
-    }
-
-    ImageBuilder& url(const std::string& value) {
-        return source(value);
-    }
-
     ImageBuilder& bingDaily(int idx = 0, const std::string& mkt = "zh-CN") {
         element_->imageSource = "bing://daily?idx=" + std::to_string(std::max(0, idx)) + "&mkt=" + mkt;
         return *this;
@@ -1180,17 +1143,9 @@ public:
         return *this;
     }
 
-    ImageBuilder& color(const Color& value) {
-        return tint(value);
-    }
-
     ImageBuilder& radius(float value) {
         element_->radius = std::max(0.0f, value);
         return *this;
-    }
-
-    ImageBuilder& rounding(float value) {
-        return radius(value);
     }
 
     ImageBuilder& opacity(float value) {
@@ -1283,10 +1238,6 @@ public:
         return *this;
     }
 
-    ImageBuilder& rotation(float radians) {
-        return rotate(radians);
-    }
-
     ImageBuilder& perspective(float value) {
         element_->transform.perspective = std::max(0.0f, value);
         return *this;
@@ -1308,19 +1259,6 @@ public:
         return *this;
     }
 
-    SvgBuilder& markup(std::string value) {
-        return source(std::move(value));
-    }
-};
-
-class CanvasBuilder : public BuilderBase<CanvasBuilder> {
-public:
-    CanvasBuilder(Ui& ui, Element* element) : BuilderBase<CanvasBuilder>(ui, element) {}
-
-    CanvasBuilder& onDraw(std::function<void(core::render::CanvasContext&)> callback) {
-        element_->onDraw = std::move(callback);
-        return *this;
-    }
 };
 
 class Ui {
@@ -1328,6 +1266,9 @@ public:
     void begin(const std::string& pageId = "") {
         pageId_ = pageId;
         roots_.clear();
+        orderedRoots_.clear();
+        hasDependentVisuals_ = false;
+        hasBackdropBlur_ = false;
         stack_.clear();
         scopeStack_.clear();
         index_.clear();
@@ -1370,10 +1311,6 @@ public:
         return TextBuilder(*this, addElement(ElementKind::Text, id));
     }
 
-    TextBuilder label(const std::string& id) {
-        return text(id);
-    }
-
     ImageBuilder image(const std::string& id) {
         return ImageBuilder(*this, addElement(ElementKind::Image, id));
     }
@@ -1382,7 +1319,7 @@ public:
         return SvgBuilder(*this, addElement(ElementKind::Svg, id));
     }
 
-    CanvasBuilder canvas(const std::string& id = "") {
+    CanvasBuilder canvas(const std::string& id) {
         return CanvasBuilder(*this, addElement(ElementKind::Canvas, id));
     }
 
@@ -1396,6 +1333,7 @@ public:
                 link.first->frame = link.second->frame();
             }
         }
+        rebuildOrderedElements();
     }
 
     void layout(const Screen& screen) {
@@ -1414,6 +1352,18 @@ public:
 
     const std::vector<std::unique_ptr<Element>>& roots() const {
         return roots_;
+    }
+
+    const std::vector<const Element*>& orderedRoots() const {
+        return orderedRoots_;
+    }
+
+    bool hasDependentVisuals() const {
+        return hasDependentVisuals_;
+    }
+
+    bool hasBackdropBlur() const {
+        return hasBackdropBlur_;
     }
 
     bool isFocused(const std::string& id) const {
@@ -1574,6 +1524,7 @@ private:
         node->setMaxHeight(element.maxLayoutHeight);
         node->setFlexGrow(element.flexGrow);
         node->setFlexShrink(element.flexShrink);
+        node->setIgnoreLayout(element.ignoreLayout);
 
         Node* raw = node.get();
         links.push_back({&element, raw});
@@ -1583,9 +1534,132 @@ private:
         return node;
     }
 
+    void rebuildOrderedElements() {
+        orderedRoots_.clear();
+        orderedRoots_.reserve(roots_.size());
+        hasDependentVisuals_ = false;
+        hasBackdropBlur_ = false;
+        for (const auto& root : roots_) {
+            orderedRoots_.push_back(root.get());
+            rebuildOrderedChildren(*root);
+            hasDependentVisuals_ = hasDependentVisuals_ || root->subtreeHasDependentVisuals;
+            hasBackdropBlur_ = hasBackdropBlur_ || root->subtreeHasBackdropBlur;
+        }
+        std::stable_sort(orderedRoots_.begin(), orderedRoots_.end(), [](const Element* a, const Element* b) {
+            return a->zIndex < b->zIndex;
+        });
+    }
+
+    static void rebuildOrderedChildren(Element& element) {
+        element.orderedChildren.clear();
+        element.orderedChildren.reserve(element.children.size());
+        element.subtreeNeedsUpdate = elementNeedsUpdate(element);
+        element.subtreeHasDependentVisuals = elementHasDependentVisuals(element);
+        element.subtreeHasBackdropBlur = elementHasBackdropBlur(element);
+        element.subtreeBlocksRetainedLayer = elementBlocksRetainedLayer(element);
+        for (const auto& child : element.children) {
+            element.orderedChildren.push_back(child.get());
+            rebuildOrderedChildren(*child);
+            element.subtreeNeedsUpdate = element.subtreeNeedsUpdate || child->subtreeNeedsUpdate;
+            element.subtreeHasDependentVisuals = element.subtreeHasDependentVisuals || child->subtreeHasDependentVisuals;
+            element.subtreeHasBackdropBlur = element.subtreeHasBackdropBlur || child->subtreeHasBackdropBlur;
+            element.subtreeBlocksRetainedLayer = element.subtreeBlocksRetainedLayer || child->subtreeBlocksRetainedLayer;
+        }
+        std::stable_sort(element.orderedChildren.begin(), element.orderedChildren.end(), [](const Element* a, const Element* b) {
+            return a->zIndex < b->zIndex;
+        });
+    }
+
+    static bool elementNeedsUpdate(const Element& element) {
+        return element.interactive ||
+               element.focusable ||
+               element.disabled ||
+               element.hasImeRect ||
+               element.onClick ||
+               element.onPress ||
+               element.onRelease ||
+               element.onMove ||
+               element.onContextMenu ||
+               element.onHoverChanged ||
+               element.onFocusChanged ||
+               element.onTextInput ||
+               element.onScroll ||
+               element.onScrollOffsetChanged ||
+               element.onDrag ||
+               element.onTimer ||
+               element.onFrame ||
+               element.timerSeconds > 0.0f ||
+               element.transition.enabled ||
+               !element.visualStateSourceId.empty() ||
+               !element.hoverOpacitySourceId.empty() ||
+               !element.pointerRuntimeSourceId.empty() ||
+               !element.scrollStateId.empty() ||
+               !element.scrollContentSourceId.empty() ||
+               !element.scrollDragSourceId.empty() ||
+               !element.scrollThumbSourceId.empty() ||
+               !element.sliderStateId.empty() ||
+               !element.sliderInputSourceId.empty() ||
+               !element.sliderFillSourceId.empty() ||
+               !element.sliderKnobSourceId.empty() ||
+               !element.dirtyKey.empty() ||
+               element.onCanvasDraw ||
+               (element.kind == ElementKind::Image && !element.imageSource.empty()) ||
+               element.kind == ElementKind::Svg ||
+               element.kind == ElementKind::Canvas;
+    }
+
+    static bool elementHasDependentVisuals(const Element& element) {
+        return !element.visualStateSourceId.empty() || !element.hoverOpacitySourceId.empty();
+    }
+
+    static bool elementHasBackdropBlur(const Element& element) {
+        return element.kind == ElementKind::Rect &&
+               (element.blur > 0.0f ||
+                (element.transition.enabled && hasAnimProperty(element.transition.properties, AnimProperty::Blur)));
+    }
+
+    static bool elementBlocksRetainedLayer(const Element& element) {
+        return element.interactive ||
+               element.focusable ||
+               element.hasImeRect ||
+               element.onClick ||
+               element.onPress ||
+               element.onRelease ||
+               element.onMove ||
+               element.onContextMenu ||
+               element.onHoverChanged ||
+               element.onFocusChanged ||
+               element.onTextInput ||
+               element.onScroll ||
+               element.onScrollOffsetChanged ||
+               element.onDrag ||
+               element.onTimer ||
+               element.onFrame ||
+               element.timerSeconds > 0.0f ||
+               !element.visualStateSourceId.empty() ||
+               !element.hoverOpacitySourceId.empty() ||
+               !element.pointerRuntimeSourceId.empty() ||
+               !element.scrollStateId.empty() ||
+               !element.scrollContentSourceId.empty() ||
+               !element.scrollDragSourceId.empty() ||
+               !element.scrollThumbSourceId.empty() ||
+               !element.sliderStateId.empty() ||
+               !element.sliderInputSourceId.empty() ||
+               !element.sliderFillSourceId.empty() ||
+               !element.sliderKnobSourceId.empty() ||
+               !element.dirtyKey.empty() ||
+               element.onCanvasDraw ||
+               (element.kind == ElementKind::Image && !element.imageSource.empty()) ||
+               element.kind == ElementKind::Svg ||
+               element.kind == ElementKind::Canvas;
+    }
+
     std::string pageId_;
     std::vector<std::string> scopeStack_;
     std::vector<std::unique_ptr<Element>> roots_;
+    std::vector<const Element*> orderedRoots_;
+    bool hasDependentVisuals_ = false;
+    bool hasBackdropBlur_ = false;
     std::vector<Element*> stack_;
     std::unordered_map<std::string, Element*> index_;
     std::string focusedId_;

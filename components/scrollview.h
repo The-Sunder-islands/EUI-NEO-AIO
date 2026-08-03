@@ -2,6 +2,7 @@
 
 #include "components/scroll.h"
 #include "core/dsl.h"
+#include "eui/signal.h"
 
 #include <algorithm>
 #include <cmath>
@@ -17,20 +18,30 @@ public:
     ScrollViewBuilder(core::dsl::Ui& ui, std::string id)
         : ui_(ui), id_(std::move(id)) {}
 
+    ScrollViewBuilder& x(float value) { x_ = value; hasX_ = true; return *this; }
+    ScrollViewBuilder& y(float value) { y_ = value; hasY_ = true; return *this; }
+    ScrollViewBuilder& position(float xValue, float yValue) {
+        x_ = xValue;
+        y_ = yValue;
+        hasX_ = true;
+        hasY_ = true;
+        return *this;
+    }
     ScrollViewBuilder& size(float width, float height) { width_ = width; height_ = height; return *this; }
     ScrollViewBuilder& offset(float value) { offset_ = std::max(0.0f, value); return *this; }
-    ScrollViewBuilder& value(float value) { return offset(value); }
+    ScrollViewBuilder& bind(eui::Signal<float>& signal) {
+        offset(signal.get());
+        onChange([&signal](float value) { signal.set(value); });
+        return *this;
+    }
     ScrollViewBuilder& gap(float value) { gap_ = std::max(0.0f, value); return *this; }
-    ScrollViewBuilder& spacing(float value) { return gap(value); }
     ScrollViewBuilder& step(float value) { step_ = std::max(1.0f, value); return *this; }
     ScrollViewBuilder& scrollbarWidth(float value) { scrollbarWidth_ = std::max(0.0f, value); return *this; }
     ScrollViewBuilder& scrollbarGap(float value) { scrollbarGap_ = std::max(0.0f, value); return *this; }
     ScrollViewBuilder& zIndex(int value) { zIndex_ = value; return *this; }
-    ScrollViewBuilder& z(int value) { return zIndex(value); }
     ScrollViewBuilder& style(const ScrollStyle& value) { scrollStyle_ = value; return *this; }
     ScrollViewBuilder& theme(const theme::ThemeColorTokens& tokens) { scrollStyle_ = ScrollStyle(tokens); return *this; }
     ScrollViewBuilder& contentKey(std::string value) { contentKey_ = std::move(value); return *this; }
-    ScrollViewBuilder& measureKey(std::string value) { return contentKey(std::move(value)); }
     ScrollViewBuilder& transition(const core::Transition& value) { transition_ = value; return *this; }
     ScrollViewBuilder& transition(float duration, core::Ease ease = core::Ease::OutCubic) {
         transition_ = core::Transition::make(duration, ease);
@@ -64,14 +75,19 @@ public:
         const std::function<void(float)> onChange = onChange_;
         const float scrollStep = step_;
 
-        ui_.stack(id_)
+        auto root = ui_.stack(id_)
             .size(width_, height_)
             .zIndex(zIndex_)
             .clip()
             .scrollState(id_, currentOffset, maxOffset, scrollStep)
-            .scrollDragFrom(id_, 0.0f)
-            .onScrollOffsetChanged(onChange)
-            .content([&] {
+            .onScrollOffsetChanged(onChange);
+        if (hasX_) {
+            root.x(x_);
+        }
+        if (hasY_) {
+            root.y(y_);
+        }
+        root.content([&] {
                 ui_.column(id_ + ".content")
                     .width(contentWidth)
                     .height(core::SizeValue::wrapContent())
@@ -87,7 +103,7 @@ public:
                 if (scrollable) {
                     components::scroll(ui_, id_ + ".scroll")
                         .style(scrollStyle_)
-                        .state(id_)
+                        .scrollStateId(id_)
                         .x(std::max(0.0f, width_ - scrollWidth))
                         .size(scrollWidth, height_)
                         .viewport(height_)
@@ -175,6 +191,10 @@ private:
     float step_ = 48.0f;
     float scrollbarWidth_ = 8.0f;
     float scrollbarGap_ = 16.0f;
+    float x_ = 0.0f;
+    float y_ = 0.0f;
+    bool hasX_ = false;
+    bool hasY_ = false;
     int zIndex_ = 0;
 };
 

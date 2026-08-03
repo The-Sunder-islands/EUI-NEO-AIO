@@ -4,11 +4,46 @@ namespace core::dsl {
 
 inline std::string Runtime::capturedInteractionId() const {
     for (const auto& item : interactions_) {
-        if (item.second.state.active && ui_.find(item.first)) {
+        if (item.second.state.active && ui_.find(item.first) && !isElementInDisabledTree(item.first)) {
             return item.first;
         }
     }
     return {};
+}
+
+inline bool Runtime::isElementInDisabledTree(const std::string& id) const {
+    if (id.empty()) {
+        return false;
+    }
+
+    bool disabledTree = false;
+    const std::string resolvedId = ui_.resolveId(id);
+    const std::vector<const Element*>& roots = orderedElements(ui_);
+    for (const Element* root : roots) {
+        if (findElementDisabledState(*root, resolvedId, false, disabledTree)) {
+            return disabledTree;
+        }
+    }
+    return false;
+}
+
+inline bool Runtime::findElementDisabledState(
+    const Element& element,
+    const std::string& id,
+    bool ancestorDisabled,
+    bool& disabledTree) const {
+    const bool currentDisabledTree = ancestorDisabled || element.disabled;
+    if (element.id == id) {
+        disabledTree = currentDisabledTree;
+        return true;
+    }
+
+    for (const auto& child : element.children) {
+        if (findElementDisabledState(*child, id, currentDisabledTree, disabledTree)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 inline std::string Runtime::hitTestInteractive(const PointerEvent& event, float dpiScale) const {
@@ -20,9 +55,9 @@ inline std::string Runtime::hitTestInteractive(const PointerEvent& event, float 
 inline std::string Runtime::hitTestFocusable(const PointerEvent& event, float dpiScale) const {
     std::string targetId;
     const RenderTransform identity;
-    const std::vector<const Element*> roots = orderedElements(ui_.roots());
+    const std::vector<const Element*>& roots = orderedElements(ui_);
     for (auto it = roots.rbegin(); it != roots.rend(); ++it) {
-        if (hitTestFocusableElement(**it, event, dpiScale, identity, false, {}, targetId)) {
+        if (hitTestFocusableElement(**it, event, dpiScale, identity, false, {}, false, targetId)) {
             break;
         }
     }
@@ -35,13 +70,54 @@ inline std::string Runtime::hitTestScrollable(const PointerEvent& event, float d
     });
 }
 
+inline std::string Runtime::resolveHoverTarget(const PointerEvent& event, float dpiScale, bool inputEnabled) {
+    const std::string capturedId = capturedInteractionId();
+    if (!capturedId.empty()) {
+        hoverTargetCacheValid_ = false;
+        return capturedId;
+    }
+
+    if (inputEnabled && canReuseHoverTarget(event, dpiScale)) {
+        return hoverTargetCacheId_;
+    }
+
+    const std::string targetId = inputEnabled ? hitTestInteractive(event, dpiScale) : std::string{};
+    hoverTargetCacheValid_ = inputEnabled;
+    hoverTargetCacheEvent_ = event;
+    hoverTargetCacheDpiScale_ = dpiScale;
+    hoverTargetCacheId_ = targetId;
+    return targetId;
+}
+
+inline bool Runtime::canReuseHoverTarget(const PointerEvent& event, float dpiScale) const {
+    if (!hoverTargetCacheValid_ ||
+        fullTreeUpdateRequested_ ||
+        pruneInstancesRequested_ ||
+        previousFrameAnimating_ ||
+        !closeEnough(hoverTargetCacheDpiScale_, dpiScale) ||
+        hoverTargetCacheEvent_.x != event.x ||
+        hoverTargetCacheEvent_.y != event.y ||
+        event.deltaX != 0.0 ||
+        event.deltaY != 0.0 ||
+        hoverTargetCacheEvent_.down != event.down ||
+        hoverTargetCacheEvent_.rightDown != event.rightDown ||
+        event.pressedThisFrame ||
+        event.releasedThisFrame ||
+        event.rightPressedThisFrame ||
+        event.rightReleasedThisFrame) {
+        return false;
+    }
+
+    return hoverTargetCacheId_.empty() || ui_.find(hoverTargetCacheId_) != nullptr;
+}
+
 template <typename Predicate>
 inline std::string Runtime::hitTest(const PointerEvent& event, float dpiScale, Predicate&& predicate) const {
     std::string targetId;
     const RenderTransform identity;
-    const std::vector<const Element*> roots = orderedElements(ui_.roots());
+    const std::vector<const Element*>& roots = orderedElements(ui_);
     for (auto it = roots.rbegin(); it != roots.rend(); ++it) {
-        if (hitTestElement(**it, event, dpiScale, identity, predicate, false, {}, targetId)) {
+        if (hitTestElement(**it, event, dpiScale, identity, predicate, false, {}, false, targetId)) {
             break;
         }
     }
@@ -57,7 +133,9 @@ inline bool Runtime::hitTestElement(
     Predicate& predicate,
     bool hasClip,
     const Rect& clipRect,
+    bool ancestorDisabled,
     std::string& targetId) const {
+    const bool disabledTree = ancestorDisabled || element.disabled;
     const RenderTransform renderTransform = resolveRenderTransform(element, dpiScale, inheritedTransform);
     Rect effectiveClip = clipRect;
     bool effectiveHasClip = hasClip;
@@ -78,14 +156,14 @@ inline bool Runtime::hitTestElement(
         return false;
     }
 
-    const std::vector<const Element*> children = orderedElements(element.children);
+    const std::vector<const Element*>& children = orderedElements(element);
     for (auto it = children.rbegin(); it != children.rend(); ++it) {
-        if (hitTestElement(**it, event, dpiScale, renderTransform, predicate, effectiveHasClip, effectiveClip, targetId)) {
+        if (hitTestElement(**it, event, dpiScale, renderTransform, predicate, effectiveHasClip, effectiveClip, disabledTree, targetId)) {
             return true;
         }
     }
 
-    if (predicate(element) && hitContains(element, event, dpiScale, bounds, renderTransform)) {
+    if (!disabledTree && predicate(element) && hitContains(element, event, dpiScale, bounds, renderTransform)) {
         targetId = element.id;
         return true;
     }
@@ -99,7 +177,9 @@ inline bool Runtime::hitTestFocusableElement(
     const RenderTransform& inheritedTransform,
     bool hasClip,
     const Rect& clipRect,
+    bool ancestorDisabled,
     std::string& targetId) const {
+    const bool disabledTree = ancestorDisabled || element.disabled;
     const RenderTransform renderTransform = resolveRenderTransform(element, dpiScale, inheritedTransform);
     Rect effectiveClip = clipRect;
     bool effectiveHasClip = hasClip;
@@ -120,13 +200,16 @@ inline bool Runtime::hitTestFocusableElement(
         return false;
     }
 
-    const std::vector<const Element*> children = orderedElements(element.children);
+    const std::vector<const Element*>& children = orderedElements(element);
     for (auto it = children.rbegin(); it != children.rend(); ++it) {
-        if (hitTestFocusableElement(**it, event, dpiScale, renderTransform, effectiveHasClip, effectiveClip, targetId)) {
+        if (hitTestFocusableElement(**it, event, dpiScale, renderTransform, effectiveHasClip, effectiveClip, disabledTree, targetId)) {
             return true;
         }
     }
 
+    if (disabledTree) {
+        return false;
+    }
     if (!hitContains(element, event, dpiScale, bounds, renderTransform)) {
         return false;
     }
@@ -161,8 +244,8 @@ inline void Runtime::setFocusedId(const std::string& id) {
             newElement->onFocusChanged(true);
         }
     }
-    needsCompose_ = true;
-    needsRender_ = true;
+    composeRequested_ = true;
+    paintRequested_ = true;
 }
 
 inline void Runtime::updateScroll(const ScrollEvent& event, const std::string& targetId) {
@@ -177,8 +260,8 @@ inline void Runtime::updateScroll(const ScrollEvent& event, const std::string& t
         }
         if (element->onScroll && !element->disabled) {
             element->onScroll(event);
-            needsCompose_ = true;
-            needsRender_ = true;
+            composeRequested_ = true;
+            paintRequested_ = true;
         }
     }
 }
@@ -188,11 +271,16 @@ inline void Runtime::updateTextInput(const KeyboardEvent& event) {
         return;
     }
 
+    if (isElementInDisabledTree(focusedId_)) {
+        setFocusedId({});
+        return;
+    }
+
     if (const Element* element = ui_.find(focusedId_)) {
         if (element->onTextInput && !element->disabled) {
             element->onTextInput(event);
-            needsCompose_ = true;
-            needsRender_ = true;
+            composeRequested_ = true;
+            paintRequested_ = true;
         }
     }
 }
@@ -208,7 +296,7 @@ inline void Runtime::updateImeCursorRect(core::window::Handle window, float dpiS
     }
 
     const Element* element = ui_.find(focusedId_);
-    if (element == nullptr || !element->hasImeRect) {
+    if (element == nullptr || isElementInDisabledTree(focusedId_) || !element->hasImeRect) {
         imeCursorRectValid_ = false;
         return;
     }
@@ -220,6 +308,11 @@ inline void Runtime::updateImeCursorRect(core::window::Handle window, float dpiS
         element->imeRect.height
     };
     const Rect pixelRect = toPixelRect(logicalRect, dpiScale);
+    if (imeCursorRectValid_ &&
+        imeCursorWindow_ == window &&
+        closeEnough(imeCursorRect_, pixelRect)) {
+        return;
+    }
     imeCursorWindow_ = window;
     imeCursorRect_ = pixelRect;
     imeCursorRectValid_ = true;
@@ -254,8 +347,8 @@ inline void Runtime::updateInteraction(
 
     if (enabled && wasHover != instance.state.hover && element.onHoverChanged) {
         element.onHoverChanged(instance.state.hover);
-        needsCompose_ = true;
-        needsRender_ = true;
+        composeRequested_ = true;
+        paintRequested_ = true;
     }
 
     if (enabled && instance.state.hover && element.cursor == CursorShape::Hand) {
@@ -270,14 +363,14 @@ inline void Runtime::updateInteraction(
         logicalEvent.deltaX /= dpiScale;
         logicalEvent.deltaY /= dpiScale;
         const Rect logicalBounds{
-            bounds.x / dpiScale,
-            bounds.y / dpiScale,
-            bounds.width / dpiScale,
-            bounds.height / dpiScale
+            interactionBounds.x / dpiScale,
+            interactionBounds.y / dpiScale,
+            interactionBounds.width / dpiScale,
+            interactionBounds.height / dpiScale
         };
         if (element.onMove(logicalEvent, logicalBounds)) {
-            needsCompose_ = true;
-            needsRender_ = true;
+            composeRequested_ = true;
+            paintRequested_ = true;
         }
     }
 
@@ -288,50 +381,51 @@ inline void Runtime::updateInteraction(
         logicalEvent.deltaX /= dpiScale;
         logicalEvent.deltaY /= dpiScale;
         const Rect logicalBounds{
-            bounds.x / dpiScale,
-            bounds.y / dpiScale,
-            bounds.width / dpiScale,
-            bounds.height / dpiScale
+            interactionBounds.x / dpiScale,
+            interactionBounds.y / dpiScale,
+            interactionBounds.width / dpiScale,
+            interactionBounds.height / dpiScale
         };
         element.onContextMenu(logicalEvent, logicalBounds);
-        needsCompose_ = true;
-        needsRender_ = true;
+        composeRequested_ = true;
+        paintRequested_ = true;
     }
 
     if (enabled && instance.state.pressStarted && !element.scrollDragSourceId.empty()) {
         beginRuntimeScrollDrag(element);
-        needsRender_ = true;
+        paintRequested_ = true;
     }
 
     if (enabled && instance.state.pressStarted && !element.sliderInputSourceId.empty()) {
         updateRuntimeSlider(element, event.x, dpiScale, true);
-        needsRender_ = true;
+        paintRequested_ = true;
         return;
     }
 
     if (enabled && instance.state.pressStarted && element.onPress) {
-        element.onPress(event, bounds);
-        needsCompose_ = true;
-        needsRender_ = true;
+        element.onPress(event, interactionBounds);
+        composeRequested_ = true;
+        paintRequested_ = true;
     }
 
     if (enabled && instance.state.clicked && element.onClick) {
         element.onClick();
-        needsCompose_ = true;
+        composeRequested_ = true;
+        paintRequested_ = true;
     }
 
     if (enabled && instance.state.released && element.onRelease) {
-        element.onRelease(event, bounds);
-        needsCompose_ = true;
-        needsRender_ = true;
+        element.onRelease(event, interactionBounds);
+        composeRequested_ = true;
+        paintRequested_ = true;
     }
 
     if (enabled && instance.state.released && !element.sliderInputSourceId.empty()) {
         if (auto state = sliderStates_.find(element.sliderInputSourceId); state != sliderStates_.end()) {
             state->second.dragging = false;
         }
-        needsCompose_ = true;
-        needsRender_ = true;
+        composeRequested_ = true;
+        paintRequested_ = true;
         return;
     }
 
@@ -357,8 +451,8 @@ inline void Runtime::updateInteraction(
             instance.state.dragDeltaX,
             instance.state.dragDeltaY
         });
-        needsCompose_ = true;
-        needsRender_ = true;
+        composeRequested_ = true;
+        paintRequested_ = true;
     }
 }
 
@@ -383,11 +477,6 @@ inline Transform Runtime::currentElementTransform(const Element& element) const 
         if (instance != images_.end()) {
             return instance->second.transform.value();
         }
-    } else if (element.kind == ElementKind::Canvas) {
-        const auto instance = canvases_.find(element.id);
-        if (instance != canvases_.end()) {
-            return instance->second.transform.value();
-        }
     } else if (element.kind == ElementKind::Row ||
                element.kind == ElementKind::Column ||
                element.kind == ElementKind::Stack) {
@@ -403,8 +492,7 @@ inline TransformMatrix Runtime::hitMatrixForElement(const Element& element, floa
     if (element.kind == ElementKind::Rect ||
         element.kind == ElementKind::Polygon ||
         element.kind == ElementKind::Text ||
-        element.kind == ElementKind::Image || element.kind == ElementKind::Svg ||
-        element.kind == ElementKind::Canvas) {
+        element.kind == ElementKind::Image || element.kind == ElementKind::Svg) {
         return combinedPrimitiveMatrix(renderTransform, bounds, scaleTransform(currentElementTransform(element), dpiScale));
     }
     return renderTransform.matrix;

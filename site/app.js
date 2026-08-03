@@ -17,13 +17,13 @@ const copy = {
     "why.eyebrow": "Why EUI-NEO",
     "why.title": "为 C++ 应用保留速度、控制力和现代 UI 体验。",
     "why.performance.title": "按需渲染",
-    "why.performance.text": "静止时等待事件，有动画才推进帧；脏区缓存减少重复绘制。",
+    "why.performance.text": "静止时等待事件，有动画才推进帧；脏区、framebuffer cache 和 retained layer cache 减少重复绘制。",
     "why.backends.title": "后端可选",
     "why.backends.text": "GLFW / SDL2 窗口后端，OpenGL / Vulkan 渲染后端，同一套 DSL 输出。",
     "why.cpp.title": "C++ 直写",
     "why.cpp.text": "无需引入 WebView 或脚本运行时，直接在 C++17 项目里声明界面和状态。",
     "why.components.title": "组件齐全",
-    "why.components.text": "输入、弹层、选择器、表格、图表和滚动容器覆盖工具型应用常见场景。",
+    "why.components.text": "输入、弹层、选择器、表格、图表、Markdown、热区和滚动容器覆盖工具型应用常见场景。",
     "docs.eyebrow": "Documentation",
     "docs.title": "查找架构、组件和集成文档",
     "docs.lede": "按渲染、输入、组件、平台能力或构建流程快速定位仓库文档。",
@@ -34,16 +34,16 @@ const copy = {
     "reader.error": "文档读取失败，请检查本地服务或路径。",
     "rendering.eyebrow": "Rendering Core",
     "rendering.title": "统一 Runtime，双渲染后端",
-    "rendering.lede": "窗口、输入、Runtime 和 GPU 后端各守边界，让同一套 DSL 输出到 OpenGL 或 Vulkan。",
+    "rendering.lede": "窗口、输入、Runtime 和 GPU 后端各守边界；dirty rect、render cache 和 retained layer cache 已覆盖 OpenGL / Vulkan。",
     "flow.compose.title": "Compose",
     "flow.compose.text": "C++ DSL 构建 UI 树，Runtime 负责布局、状态同步和交互派发。",
     "flow.dirty.title": "Dirty Rect",
-    "flow.dirty.text": "按 id 缓存图元，变化时计算保守脏区，必要时升级 full redraw。",
+    "flow.dirty.text": "按 id 缓存图元和子树能力，变化时合并保守脏区，blur 等依赖内容会升级 full paint。",
     "flow.backend.title": "Backend",
-    "flow.backend.text": "OpenGL 与 Vulkan 各自管理 pipeline、atlas、texture 和 frame lifecycle。",
+    "flow.backend.text": "OpenGL 与 Vulkan 各自管理 pipeline、atlas、texture、render cache、retained layer 和 frame lifecycle。",
     "components.eyebrow": "Component Layer",
     "components.title": "为工具型界面准备的组件层",
-    "components.lede": "按钮、输入、弹层、选择器、图表和数据表都只组合 DSL 树，不穿透后端 primitive。",
+    "components.lede": "按钮、输入、弹层、选择器、图表、Markdown 和数据表都只组合 DSL 树，不穿透后端 primitive。",
     "start.eyebrow": "Quick Start",
     "start.title": "把 EUI-NEO 接入你的 CMake 项目",
     "start.cmake": "CMake 引入",
@@ -69,13 +69,13 @@ const copy = {
     "why.eyebrow": "Why EUI-NEO",
     "why.title": "Keep native C++ apps fast, controllable, and visually modern.",
     "why.performance.title": "On-demand rendering",
-    "why.performance.text": "Idle apps wait for events; animated views advance frames only when needed, with dirty caching to reduce redraw work.",
+    "why.performance.text": "Idle apps wait for events; animated views advance frames only when needed, while dirty regions, framebuffer cache, and retained layers reduce redraw work.",
     "why.backends.title": "Backend choice",
     "why.backends.text": "Use GLFW or SDL2 for windows, OpenGL or Vulkan for rendering, with one shared DSL.",
     "why.cpp.title": "Native C++ workflow",
     "why.cpp.text": "No WebView or scripting runtime. Declare UI and state directly inside a C++17 project.",
     "why.components.title": "Practical components",
-    "why.components.text": "Inputs, popups, pickers, tables, charts, and scroll containers cover common tool-app workflows.",
+    "why.components.text": "Inputs, popups, pickers, tables, charts, Markdown, input hot zones, and scroll containers cover common tool-app workflows.",
     "docs.eyebrow": "Documentation",
     "docs.title": "Find architecture, component, and integration notes",
     "docs.lede": "Search rendering, input, components, platform capabilities, and build workflows directly from the repository docs.",
@@ -86,16 +86,16 @@ const copy = {
     "reader.error": "Could not load this document. Check the local server or path.",
     "rendering.eyebrow": "Rendering Core",
     "rendering.title": "One Runtime, two render backends",
-    "rendering.lede": "Windowing, input, Runtime, and GPU backends stay separated while one DSL targets OpenGL or Vulkan.",
+    "rendering.lede": "Windowing, input, Runtime, and GPU backends stay separated; dirty rects, render cache, and retained layer cache now cover OpenGL and Vulkan.",
     "flow.compose.title": "Compose",
     "flow.compose.text": "The C++ DSL builds the UI tree while Runtime owns layout, state sync, and interaction dispatch.",
     "flow.dirty.title": "Dirty Rect",
-    "flow.dirty.text": "Primitives are cached by id; visual changes produce conservative dirty regions or full redraws.",
+    "flow.dirty.text": "Primitives and subtree metadata are cached by id; visual changes merge conservative dirty regions, while blur-dependent frames promote to full paint.",
     "flow.backend.title": "Backend",
-    "flow.backend.text": "OpenGL and Vulkan manage their own pipelines, atlases, textures, and frame lifecycle.",
+    "flow.backend.text": "OpenGL and Vulkan manage their own pipelines, atlases, textures, render cache, retained layers, and frame lifecycle.",
     "components.eyebrow": "Component Layer",
     "components.title": "A component layer for tool-grade interfaces",
-    "components.lede": "Buttons, inputs, popups, pickers, charts, and data tables compose DSL trees without touching backend primitives.",
+    "components.lede": "Buttons, inputs, popups, pickers, charts, Markdown, and data tables compose DSL trees without touching backend primitives.",
     "start.eyebrow": "Quick Start",
     "start.title": "Add EUI-NEO to your CMake project",
     "start.cmake": "Add CMake",
@@ -150,7 +150,20 @@ const docs = [
       title: "Components",
       desc: "Component naming, controlled state, inputs, pickers, and charts."
     },
-    tags: "components button input chart picker datatable"
+    tags: "components button input chart picker datatable markdown tooltip context menu mouse area signal"
+  },
+  {
+    category: "core",
+    href: "../docs/状态.md",
+    zh: {
+      title: "状态模型",
+      desc: "Runtime 状态、受控组件、Signal 绑定和生命周期。"
+    },
+    en: {
+      title: "State Model",
+      desc: "Runtime state, controlled components, Signal bindings, and lifecycle."
+    },
+    tags: "state signal controlled binding lifecycle"
   },
   {
     category: "rendering",
@@ -163,20 +176,20 @@ const docs = [
       title: "Render Backend Architecture And Pipeline",
       desc: "Boundaries and pipeline across GLFW/SDL2, OpenGL/Vulkan, and Runtime."
     },
-    tags: "opengl vulkan glfw sdl2 backend runtime render dirty rect cache blur fps"
+    tags: "opengl vulkan glfw sdl2 backend runtime render dirty rect cache retained layer blur fps"
   },
   {
     category: "rendering",
-    href: "../docs/Slint渲染与优化对比.md",
+    href: "../docs/retained_layer_cache.md",
     zh: {
-      title: "Slint 渲染与优化对比",
-      desc: "Renderer 选择、partial rendering 和 EUI-NEO 脏区优化。"
+      title: "Retained Layer Cache",
+      desc: "稳定静态子树的离屏 layer 缓存，OpenGL / Vulkan 后端资源和限制。"
     },
     en: {
-      title: "Slint Rendering Comparison",
-      desc: "Renderer choices, partial rendering, and EUI-NEO dirty optimization."
+      title: "Retained Layer Cache",
+      desc: "Offscreen layer caching for stable static subtrees, with OpenGL / Vulkan backend resources and limits."
     },
-    tags: "slint renderer optimization dirty partial rendering"
+    tags: "retained layer cache static subtree opengl vulkan framebuffer texture"
   },
   {
     category: "platform",
@@ -216,6 +229,19 @@ const docs = [
       desc: "Transitions, easing, state animation, and transforms."
     },
     tags: "animation transition easing transform"
+  },
+  {
+    category: "core",
+    href: "../docs/图片.md",
+    zh: {
+      title: "图片",
+      desc: "图片源、远程图片、SVG、GIF 和纹理缓存。"
+    },
+    en: {
+      title: "Images",
+      desc: "Image sources, remote images, SVG, GIF, and texture cache."
+    },
+    tags: "image svg gif texture cache remote"
   },
   {
     category: "platform",
@@ -268,24 +294,56 @@ const docs = [
       desc: "Async text requests, image requests, and network result cache."
     },
     tags: "network async image request curl"
+  },
+  {
+    category: "platform",
+    href: "../docs/异步.md",
+    zh: {
+      title: "异步",
+      desc: "异步任务、请求和 Runtime 结果回收。"
+    },
+    en: {
+      title: "Async",
+      desc: "Async tasks, requests, and Runtime result collection."
+    },
+    tags: "async task request runtime"
   }
 ];
 
 const components = [
   "button",
+  "checkbox",
+  "radio",
+  "toggleSwitch",
+  "progress",
+  "slider",
   "input",
+  "segmented",
+  "stepper",
   "tabs",
-  "dialog",
-  "toast",
-  "dropdown",
-  "datatable",
-  "linechart",
-  "barchart",
-  "piechart",
-  "datepicker",
-  "colorpicker",
+  "scroll",
   "scrollView",
-  "carousel"
+  "markdown",
+  "dropdown",
+  "datePicker",
+  "timePicker",
+  "colorPicker",
+  "dataTable",
+  "dialog",
+  "sidebar",
+  "toast",
+  "tooltip",
+  "contextMenu",
+  "carousel",
+  "lineChart",
+  "barChart",
+  "pieChart",
+  "mouseArea",
+  "panel",
+  "card",
+  "layoutDebugOverlay",
+  "workshop::heartSwitch",
+  "workshop::tiltCard"
 ];
 
 let currentLang = localStorage.getItem("eui-site-lang") || "zh";
@@ -301,6 +359,8 @@ const readerCategory = document.querySelector("#readerCategory");
 const readerBody = document.querySelector("#readerBody");
 const themeButton = document.querySelector("#themeButton");
 const progressBar = document.querySelector("#progressBar");
+const stageSections = Array.from(document.querySelectorAll("main > section"));
+let tickingScroll = false;
 
 function t(key) {
   return copy[currentLang][key] || copy.zh[key] || key;
@@ -390,7 +450,7 @@ function renderDocs() {
       <span class="doc-arrow" aria-hidden="true">›</span>
     `;
     docsGrid.appendChild(card);
-    observeReveal(card);
+    observeReveal(card, "doc", index);
   });
 }
 
@@ -426,6 +486,7 @@ function renderMarkdown(markdown) {
   let inCode = false;
   let code = [];
   let listOpen = false;
+  let inTable = false;
 
   const closeList = () => {
     if (listOpen) {
@@ -433,8 +494,15 @@ function renderMarkdown(markdown) {
       listOpen = false;
     }
   };
+  const closeTable = () => {
+    if (inTable) {
+      html += "</tbody></table></div>";
+      inTable = false;
+    }
+  };
 
-  for (const line of lines) {
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
     if (line.startsWith("```")) {
       if (inCode) {
         html += `<pre><code>${escapeHtml(code.join("\n"))}</code></pre>`;
@@ -442,6 +510,7 @@ function renderMarkdown(markdown) {
         inCode = false;
       } else {
         closeList();
+        closeTable();
         inCode = true;
       }
       continue;
@@ -452,8 +521,27 @@ function renderMarkdown(markdown) {
     }
     if (!line.trim()) {
       closeList();
+      closeTable();
       continue;
     }
+    if (!inTable && isMarkdownTableHeader(line, lines[index + 1] || "")) {
+      closeList();
+      const headers = splitMarkdownTableRow(line);
+      html += "<div class=\"table-scroll\"><table><thead><tr>";
+      html += headers.map((cell) => `<th>${inlineMarkdown(cell)}</th>`).join("");
+      html += "</tr></thead><tbody>";
+      inTable = true;
+      index += 1;
+      continue;
+    }
+    if (inTable && isMarkdownTableRow(line)) {
+      const cells = splitMarkdownTableRow(line);
+      html += "<tr>";
+      html += cells.map((cell) => `<td>${inlineMarkdown(cell)}</td>`).join("");
+      html += "</tr>";
+      continue;
+    }
+    closeTable();
     const heading = line.match(/^(#{1,4})\s+(.+)$/);
     if (heading) {
       closeList();
@@ -474,7 +562,28 @@ function renderMarkdown(markdown) {
     html += `<p>${inlineMarkdown(line)}</p>`;
   }
   closeList();
+  closeTable();
   return html;
+}
+
+function isMarkdownTableHeader(line, separator) {
+  return isMarkdownTableRow(line) && /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(separator);
+}
+
+function isMarkdownTableRow(line) {
+  const trimmed = line.trim();
+  return trimmed.includes("|") && trimmed.split("|").length >= 3;
+}
+
+function splitMarkdownTableRow(line) {
+  let trimmed = line.trim();
+  if (trimmed.startsWith("|")) {
+    trimmed = trimmed.slice(1);
+  }
+  if (trimmed.endsWith("|")) {
+    trimmed = trimmed.slice(0, -1);
+  }
+  return trimmed.split("|").map((cell) => cell.trim());
 }
 
 function inlineMarkdown(value) {
@@ -501,11 +610,13 @@ function escapeHtml(value) {
 
 function renderComponents() {
   const list = document.querySelector("#componentList");
-  components.forEach((name) => {
+  list.innerHTML = "";
+  components.forEach((name, index) => {
     const item = document.createElement("span");
     item.className = "component-pill";
     item.textContent = name;
     list.appendChild(item);
+    observeReveal(item, "component", index);
   });
 }
 
@@ -527,11 +638,56 @@ window.addEventListener("keydown", (event) => {
   }
 });
 
-window.addEventListener("scroll", () => {
+function updateScrollState() {
   const max = document.documentElement.scrollHeight - window.innerHeight;
   const progress = max > 0 ? window.scrollY / max : 0;
+  const breath = (Math.sin(progress * Math.PI * 2.8) + 1) * 0.5;
+  const activeIndex = activeStageIndex();
+
   progressBar.style.transform = `scaleX(${progress})`;
-}, { passive: true });
+  document.documentElement.style.setProperty("--scroll-progress", (0.72 + progress * 0.28).toFixed(4));
+  document.documentElement.style.setProperty("--breath", breath.toFixed(4));
+  document.documentElement.style.setProperty("--stage", String(activeIndex));
+  document.documentElement.style.setProperty("--breath-shift", `${(breath * 10).toFixed(2)}px`);
+  document.documentElement.style.setProperty("--breath-shift-neg", `${(breath * -10).toFixed(2)}px`);
+  document.documentElement.style.setProperty("--breath-small-up", `${(breath * -4).toFixed(2)}px`);
+  document.documentElement.style.setProperty("--breath-small-down", `${(breath * 3).toFixed(2)}px`);
+  document.documentElement.style.setProperty("--breath-scale", (1 + breath * 0.012).toFixed(4));
+  document.documentElement.style.setProperty("--breath-grid-opacity", (0.48 + breath * 0.22).toFixed(4));
+  document.documentElement.style.setProperty("--breath-glow", `${(12 + breath * 20).toFixed(2)}px`);
+  document.documentElement.style.setProperty("--stage-primary-mix", `${(22 + breath * 34).toFixed(2)}%`);
+
+  stageSections.forEach((section, index) => {
+    section.classList.toggle("active-stage", index === activeIndex);
+  });
+  tickingScroll = false;
+}
+
+function requestScrollState() {
+  if (tickingScroll) {
+    return;
+  }
+  tickingScroll = true;
+  window.requestAnimationFrame(updateScrollState);
+}
+
+function activeStageIndex() {
+  const probe = window.innerHeight * 0.42;
+  let bestIndex = 0;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  stageSections.forEach((section, index) => {
+    const rect = section.getBoundingClientRect();
+    const distance = Math.abs(rect.top + rect.height * 0.28 - probe);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestIndex = index;
+    }
+  });
+  return bestIndex;
+}
+
+window.addEventListener("scroll", requestScrollState, { passive: true });
+window.addEventListener("resize", requestScrollState, { passive: true });
 
 window.addEventListener("pointermove", (event) => {
   const x = (event.clientX / window.innerWidth - 0.5) * 18;
@@ -548,16 +704,48 @@ const revealObserver = new IntersectionObserver((entries) => {
   });
 }, { threshold: 0.14 });
 
-function observeReveal(node) {
+function revealKindForSection(node) {
+  if (node.classList.contains("hero") || node.classList.contains("manifest")) {
+    return "hero";
+  }
+  if (node.classList.contains("doc-search")) {
+    return "docs";
+  }
+  if (node.classList.contains("rendering")) {
+    return "render";
+  }
+  if (node.classList.contains("showcase")) {
+    return "showcase";
+  }
+  if (node.classList.contains("components-band")) {
+    return "components";
+  }
+  if (node.classList.contains("start")) {
+    return "build";
+  }
+  return "hero";
+}
+
+function observeReveal(node, kind = "section", index = 0) {
   node.classList.add("reveal");
+  node.style.setProperty("--reveal-index", String(Math.min(index, 18)));
+  const revealKind = kind === "section" ? revealKindForSection(node) : kind;
+  node.classList.add(`reveal-stage-${revealKind}`);
   revealObserver.observe(node);
 }
 
-document.querySelectorAll("section, .doc-card, .flow-item").forEach((node) => {
-  observeReveal(node);
+document.querySelectorAll("main > section").forEach((node, index) => {
+  observeReveal(node, "section", index);
+});
+document.querySelectorAll(".flow-item").forEach((node, index) => {
+  observeReveal(node, "flow", index);
+});
+document.querySelectorAll(".code-step").forEach((node, index) => {
+  observeReveal(node, "code", index);
 });
 
 searchInput.addEventListener("input", renderDocs);
 renderComponents();
 setTheme(currentTheme);
 setLanguage(currentLang);
+updateScrollState();

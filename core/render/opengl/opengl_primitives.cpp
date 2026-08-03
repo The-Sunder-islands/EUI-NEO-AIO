@@ -1,7 +1,3 @@
-#ifndef EUI_SHADER_PRELUDE
-#define EUI_SHADER_PRELUDE "#version 330 core\n"
-#endif
-
 #include "core/render/opengl/opengl_backend.h"
 
 #include "core/window/window_backend.h"
@@ -11,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -52,8 +49,26 @@ struct PrimitiveResources {
     int backdropTextureHeight = 0;
 };
 
+constexpr int kMaxPolygonEdges = 128;
+
+struct PolygonResources {
+    GLuint vao = 0;
+    GLuint vbo = 0;
+    GLuint shaderProgram = 0;
+    GLint windowSizeLocation = -1;
+    GLint fillColorLocation = -1;
+    GLint opacityLocation = -1;
+    GLint edgeCountLocation = -1;
+    GLint edgesLocation = -1;
+};
+
 PrimitiveResources& primitiveResources() {
     static std::unordered_map<window::ContextKey, PrimitiveResources> resourcesByContext;
+    return resourcesByContext[window::currentContextKey()];
+}
+
+PolygonResources& polygonResources() {
+    static std::unordered_map<window::ContextKey, PolygonResources> resourcesByContext;
     return resourcesByContext[window::currentContextKey()];
 }
 
@@ -90,6 +105,19 @@ void releaseResources(PrimitiveResources& resources) {
     resources = {};
 }
 
+void releaseResources(PolygonResources& resources) {
+    if (resources.vbo) {
+        glDeleteBuffers(1, &resources.vbo);
+    }
+    if (resources.vao) {
+        glDeleteVertexArrays(1, &resources.vao);
+    }
+    if (resources.shaderProgram) {
+        glDeleteProgram(resources.shaderProgram);
+    }
+    resources = {};
+}
+
 bool ensurePrimitiveResources() {
     PrimitiveResources& resources = primitiveResources();
     if (resources.shaderProgram != 0 && resources.vao != 0 && resources.vbo != 0) {
@@ -97,7 +125,7 @@ bool ensurePrimitiveResources() {
     }
 
     const char* vertexSource =
-        EUI_SHADER_PRELUDE
+        "#version 330 core\n"
         "layout(location = 0) in vec3 aScreenPos;\n"
         "layout(location = 1) in vec2 aLocalPos;\n"
         "uniform vec2 uWindowSize;\n"
@@ -110,7 +138,7 @@ bool ensurePrimitiveResources() {
         "}\n";
 
     const char* fragmentSource =
-        EUI_SHADER_PRELUDE
+        "#version 330 core\n"
         "in vec2 vLocalPos;\n"
         "out vec4 FragColor;\n"
         "uniform vec4 uFillColor;\n"
@@ -249,6 +277,117 @@ bool ensurePrimitiveResources() {
     resources.shadowOffsetLocation = glGetUniformLocation(resources.shaderProgram, "uShadowOffset");
     resources.shadowSpreadLocation = glGetUniformLocation(resources.shaderProgram, "uShadowSpread");
     resources.backdropLocation = glGetUniformLocation(resources.shaderProgram, "uBackdrop");
+
+    glGenVertexArrays(1, &resources.vao);
+    glGenBuffers(1, &resources.vbo);
+    glBindVertexArray(resources.vao);
+    glBindBuffer(GL_ARRAY_BUFFER, resources.vbo);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(PrimitiveGeometryVertex), nullptr);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(PrimitiveGeometryVertex), reinterpret_cast<void*>(offsetof(PrimitiveGeometryVertex, local)));
+    glEnableVertexAttribArray(1);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+
+    return resources.shaderProgram != 0 && resources.vao != 0 && resources.vbo != 0;
+}
+
+bool ensurePolygonResources() {
+    PolygonResources& resources = polygonResources();
+    if (resources.shaderProgram != 0 && resources.vao != 0 && resources.vbo != 0) {
+        return true;
+    }
+
+    const char* vertexSource =
+        "#version 330 core\n"
+        "layout(location = 0) in vec3 aScreenPos;\n"
+        "layout(location = 1) in vec2 aLocalPos;\n"
+        "uniform vec2 uWindowSize;\n"
+        "out vec2 vLocalPos;\n"
+        "void main() {\n"
+        "    vLocalPos = aLocalPos;\n"
+        "    vec2 ndc = vec2((aScreenPos.x / uWindowSize.x) * 2.0 - 1.0,\n"
+        "                    1.0 - (aScreenPos.y / uWindowSize.y) * 2.0);\n"
+        "    gl_Position = vec4(ndc * aScreenPos.z, 0.0, aScreenPos.z);\n"
+        "}\n";
+
+    const char* fragmentSource =
+        "#version 330 core\n"
+        "#define MAX_POLYGON_EDGES 128\n"
+        "in vec2 vLocalPos;\n"
+        "out vec4 FragColor;\n"
+        "uniform vec4 uFillColor;\n"
+        "uniform float uOpacity;\n"
+        "uniform int uEdgeCount;\n"
+        "uniform vec4 uEdges[MAX_POLYGON_EDGES];\n"
+        "float edgeDistance(vec2 p, vec2 a, vec2 b) {\n"
+        "    vec2 ab = b - a;\n"
+        "    float t = clamp(dot(p - a, ab) / max(dot(ab, ab), 0.0001), 0.0, 1.0);\n"
+        "    return length(p - (a + ab * t));\n"
+        "}\n"
+        "bool polygonContains(vec2 p) {\n"
+        "    bool inside = false;\n"
+        "    for (int i = 0; i < MAX_POLYGON_EDGES; ++i) {\n"
+        "        if (i >= uEdgeCount) break;\n"
+        "        vec4 edge = uEdges[i];\n"
+        "        vec2 a = edge.xy;\n"
+        "        vec2 b = edge.zw;\n"
+        "        bool crosses = ((a.y > p.y) != (b.y > p.y));\n"
+        "        if (crosses) {\n"
+        "            float xAtY = (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x;\n"
+        "            if (p.x < xAtY) {\n"
+        "                inside = !inside;\n"
+        "            }\n"
+        "        }\n"
+        "    }\n"
+        "    return inside;\n"
+        "}\n"
+        "void main() {\n"
+        "    bool inside = polygonContains(vLocalPos);\n"
+        "    float minDistance = 1000000.0;\n"
+        "    for (int i = 0; i < MAX_POLYGON_EDGES; ++i) {\n"
+        "        if (i >= uEdgeCount) break;\n"
+        "        vec4 edge = uEdges[i];\n"
+        "        minDistance = min(minDistance, edgeDistance(vLocalPos, edge.xy, edge.zw));\n"
+        "    }\n"
+        "    float signedDistance = inside ? -minDistance : minDistance;\n"
+        "    float edgeWidth = max(fwidth(signedDistance), 0.75);\n"
+        "    float shapeAlpha = 1.0 - smoothstep(-edgeWidth, edgeWidth, signedDistance);\n"
+        "    if (shapeAlpha <= 0.0) discard;\n"
+        "    FragColor = vec4(uFillColor.rgb, uFillColor.a * shapeAlpha * uOpacity);\n"
+        "}\n";
+
+    GLuint vertexShader = compileShader(GL_VERTEX_SHADER, vertexSource);
+    GLuint fragmentShader = compileShader(GL_FRAGMENT_SHADER, fragmentSource);
+    if (!vertexShader || !fragmentShader) {
+        if (vertexShader) {
+            glDeleteShader(vertexShader);
+        }
+        if (fragmentShader) {
+            glDeleteShader(fragmentShader);
+        }
+        return false;
+    }
+
+    resources.shaderProgram = glCreateProgram();
+    glAttachShader(resources.shaderProgram, vertexShader);
+    glAttachShader(resources.shaderProgram, fragmentShader);
+    glLinkProgram(resources.shaderProgram);
+    glDeleteShader(vertexShader);
+    glDeleteShader(fragmentShader);
+
+    GLint linked = 0;
+    glGetProgramiv(resources.shaderProgram, GL_LINK_STATUS, &linked);
+    if (!linked) {
+        releaseResources(resources);
+        return false;
+    }
+
+    resources.windowSizeLocation = glGetUniformLocation(resources.shaderProgram, "uWindowSize");
+    resources.fillColorLocation = glGetUniformLocation(resources.shaderProgram, "uFillColor");
+    resources.opacityLocation = glGetUniformLocation(resources.shaderProgram, "uOpacity");
+    resources.edgeCountLocation = glGetUniformLocation(resources.shaderProgram, "uEdgeCount");
+    resources.edgesLocation = glGetUniformLocation(resources.shaderProgram, "uEdges[0]");
 
     glGenVertexArrays(1, &resources.vao);
     glGenBuffers(1, &resources.vbo);
@@ -409,8 +548,56 @@ void OpenGLRenderBackend::drawRoundedRect(const RoundedRectDrawCommand& command,
     glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(command.vertices.size()));
 }
 
+void OpenGLRenderBackend::drawPolygon(const PolygonDrawCommand& command, int windowWidth, int windowHeight) {
+    if (command.vertices.empty() || command.edges.size() < 3 || windowWidth <= 0 || windowHeight <= 0 ||
+        command.opacity <= 0.001f || command.fillColor.a <= 0.001f) {
+        return;
+    }
+
+    PolygonResources& resources = polygonResources();
+    const bool hadResources = resources.shaderProgram != 0 && resources.vao != 0 && resources.vbo != 0;
+    if (!ensurePolygonResources()) {
+        return;
+    }
+    if (!hadResources) {
+        resetStateCache();
+    }
+    setStandardAlphaBlend();
+
+    std::vector<float> edges;
+    const int edgeCount = std::min(static_cast<int>(command.edges.size()), kMaxPolygonEdges);
+    edges.reserve(static_cast<std::size_t>(edgeCount) * 4u);
+    for (int index = 0; index < edgeCount; ++index) {
+        const PolygonEdgeData& edge = command.edges[static_cast<std::size_t>(index)];
+        edges.push_back(edge.from.x);
+        edges.push_back(edge.from.y);
+        edges.push_back(edge.to.x);
+        edges.push_back(edge.to.y);
+    }
+
+    useProgram(resources.shaderProgram);
+    glUniform2f(resources.windowSizeLocation, static_cast<float>(windowWidth), static_cast<float>(windowHeight));
+    glUniform4f(resources.fillColorLocation, command.fillColor.r, command.fillColor.g, command.fillColor.b, command.fillColor.a);
+    glUniform1f(resources.opacityLocation, command.opacity);
+    glUniform1i(resources.edgeCountLocation, edgeCount);
+    glUniform4fv(resources.edgesLocation, edgeCount, edges.data());
+
+    bindVertexArray(resources.vao);
+    bindArrayBuffer(resources.vbo);
+    glBufferData(GL_ARRAY_BUFFER,
+                 static_cast<GLsizeiptr>(command.vertices.size() * sizeof(PrimitiveGeometryVertex)),
+                 command.vertices.data(),
+                 GL_DYNAMIC_DRAW);
+    glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(command.vertices.size()));
+}
+
 void OpenGLRenderBackend::releasePrimitiveResources() {
     releaseResources(primitiveResources());
+    resetStateCache();
+}
+
+void OpenGLRenderBackend::releasePolygonResources() {
+    releaseResources(polygonResources());
     resetStateCache();
 }
 

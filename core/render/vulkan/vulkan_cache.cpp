@@ -5,6 +5,19 @@
 #include <algorithm>
 #include <array>
 #include <limits>
+#include <utility>
+
+namespace {
+
+bool platformRequiresConservativeCacheSync() {
+#if defined(__APPLE__)
+    return true;
+#else
+    return false;
+#endif
+}
+
+} // namespace
 
 namespace core::render::vulkan {
 
@@ -91,6 +104,7 @@ bool VulkanRenderBackend::ensureRenderCache(int width, int height) {
     renderCacheExtent_ = extent;
     renderCacheLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
     renderCacheRecreated_ = true;
+    invalidateRenderCacheSync();
     return true;
 }
 
@@ -106,31 +120,61 @@ void VulkanRenderBackend::releaseRenderCache() {
     renderCacheRecreated_ = false;
 }
 
-void VulkanRenderBackend::beginRenderCacheFrame(int, int) {
+void VulkanRenderBackend::beginRenderCacheFrame(int width,
+                                                int height,
+                                                const std::vector<core::Rect>& repaintRects) {
     if (!frameActive_ || renderCacheFramebuffer_ == VK_NULL_HANDLE) {
         return;
     }
     endActiveRenderPass();
+    cacheRenderArea_ = fullRenderRect(width, height);
+    std::vector<core::Rect> renderRects = platformRequiresConservativeCacheSync()
+        ? std::vector<core::Rect>{}
+        : mergeRenderRects(clampRenderRects(repaintRects, width, height));
+    if (!renderRects.empty()) {
+        core::Rect area = renderRects.front();
+        for (std::size_t i = 1; i < renderRects.size(); ++i) {
+            area = unionRenderRect(area, renderRects[i]);
+        }
+        cacheRenderArea_ = area;
+    }
+    renderTarget_ = RenderTarget::RenderCache;
     renderingToCache_ = true;
+    activeLayer_ = nullptr;
 }
 
 void VulkanRenderBackend::endRenderCacheFrame() {
     endActiveRenderPass();
+    renderTarget_ = RenderTarget::Swapchain;
     renderingToCache_ = false;
 }
 
-void VulkanRenderBackend::blitRenderCache(int width, int height) {
+void VulkanRenderBackend::blitRenderCache(int width,
+                                          int height,
+                                          RenderCacheBlitMode mode,
+                                          const std::vector<core::Rect>& dirtyRects) {
     if (!frameActive_ || renderCacheImage_ == VK_NULL_HANDLE || renderCacheExtent_.width == 0 ||
         renderCacheExtent_.height == 0 || commandBuffers_.empty() || currentImage_ >= commandBuffers_.size() ||
         currentImage_ >= swapchainImages_.size()) {
         return;
     }
     endActiveRenderPass();
+    renderTarget_ = RenderTarget::Swapchain;
     renderingToCache_ = false;
+    activeLayer_ = nullptr;
 
     width = std::min(std::max(1, width), static_cast<int>(std::min(renderCacheExtent_.width, swapchainExtent_.width)));
     height = std::min(std::max(1, height), static_cast<int>(std::min(renderCacheExtent_.height, swapchainExtent_.height)));
     if (width <= 0 || height <= 0) {
+        return;
+    }
+
+    std::vector<core::Rect> blitRects = resolveRenderCacheBlitRects(width, height, mode, dirtyRects);
+    if (blitRects.empty()) {
+        if (currentImage_ < swapchainImageCacheGenerations_.size() &&
+            swapchainImageCacheGenerations_[currentImage_] == renderCacheGeneration_) {
+            frameRecorded_ = true;
+        }
         return;
     }
 
@@ -140,31 +184,145 @@ void VulkanRenderBackend::blitRenderCache(int width, int height) {
         transitionRenderCacheImage(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
         transitionSwapchainImage(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
-        VkImageCopy copyRegion{};
-        copyRegion.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        copyRegion.srcSubresource.layerCount = 1;
-        copyRegion.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        copyRegion.dstSubresource.layerCount = 1;
-        copyRegion.extent = {
-            static_cast<std::uint32_t>(width),
-            static_cast<std::uint32_t>(height),
-            1
-        };
+        std::vector<VkImageCopy> copyRegions;
+        copyRegions.reserve(blitRects.size());
+        for (const core::Rect& rect : blitRects) {
+            VkImageCopy copyRegion{};
+            copyRegion.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            copyRegion.srcSubresource.layerCount = 1;
+            copyRegion.srcOffset = {
+                static_cast<std::int32_t>(rect.x),
+                static_cast<std::int32_t>(rect.y),
+                0
+            };
+            copyRegion.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            copyRegion.dstSubresource.layerCount = 1;
+            copyRegion.dstOffset = copyRegion.srcOffset;
+            copyRegion.extent = {
+                static_cast<std::uint32_t>(rect.width),
+                static_cast<std::uint32_t>(rect.height),
+                1
+            };
+            copyRegions.push_back(copyRegion);
+        }
         vkCmdCopyImage(commandBuffer,
                        renderCacheImage_,
                        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                        swapchainImages_[currentImage_],
                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                       1,
-                       &copyRegion);
+                       static_cast<std::uint32_t>(copyRegions.size()),
+                       copyRegions.data());
+        currentRenderFrameStats().backendCopyRegions += static_cast<int>(copyRegions.size());
         copied = true;
     } else {
+        blitRects = {fullRenderRect(width, height)};
         copied = drawRenderCacheResolve(width, height);
     }
     if (!copied) {
         return;
     }
+    if (currentImage_ < swapchainImageCacheGenerations_.size()) {
+        swapchainImageCacheGenerations_[currentImage_] = renderCacheGeneration_;
+    }
+    core::render::RenderFrameStats& stats = core::render::currentRenderFrameStats();
+    stats.cacheBlits += static_cast<int>(blitRects.size());
+    stats.blitPixels += renderRectAreaPixels(blitRects);
+    setPresentDirtyRects(blitRects);
     frameRecorded_ = true;
+}
+
+std::vector<core::Rect> VulkanRenderBackend::resolveRenderCacheBlitRects(int width,
+                                                                         int height,
+                                                                         RenderCacheBlitMode mode,
+                                                                         const std::vector<core::Rect>& dirtyRects) {
+    constexpr std::size_t kMaxBlitRects = 16;
+    constexpr double kMaxBlitAreaRatio = 0.65;
+
+    const core::Rect fullRect = fullRenderRect(width, height);
+    auto useFull = [&] {
+        return std::vector<core::Rect>{fullRect};
+    };
+
+    const bool cacheChanged = mode == RenderCacheBlitMode::Full || mode == RenderCacheBlitMode::Dirty;
+    if (cacheChanged) {
+        ++renderCacheGeneration_;
+        const bool updateFull = mode == RenderCacheBlitMode::Full;
+        const std::vector<core::Rect> updateRects = updateFull
+            ? std::vector<core::Rect>{fullRect}
+            : clampRenderRects(dirtyRects, width, height);
+        recordRenderCacheBlitHistory(renderCacheGeneration_, updateFull || updateRects.empty(), updateRects);
+    } else if (renderCacheGeneration_ == 0) {
+        renderCacheGeneration_ = 1;
+        recordRenderCacheBlitHistory(renderCacheGeneration_, true, {fullRect});
+    }
+
+    if (platformRequiresConservativeCacheSync()) {
+        return useFull();
+    }
+
+    if (mode == RenderCacheBlitMode::Full || currentImage_ >= swapchainImageCacheGenerations_.size()) {
+        return useFull();
+    }
+
+    const std::uint64_t syncedGeneration = swapchainImageCacheGenerations_[currentImage_];
+    if (syncedGeneration == renderCacheGeneration_) {
+        return {};
+    }
+    if (syncedGeneration == 0 || syncedGeneration > renderCacheGeneration_) {
+        return useFull();
+    }
+
+    std::vector<core::Rect> requiredRects;
+    for (std::uint64_t generation = syncedGeneration + 1; generation <= renderCacheGeneration_; ++generation) {
+        const auto found = std::find_if(renderCacheHistory_.begin(), renderCacheHistory_.end(), [&](const RenderCacheHistoryEntry& entry) {
+            return entry.generation == generation;
+        });
+        if (found == renderCacheHistory_.end() || found->full) {
+            return useFull();
+        }
+        requiredRects.insert(requiredRects.end(), found->rects.begin(), found->rects.end());
+    }
+
+    requiredRects = mergeRenderRects(clampRenderRects(requiredRects, width, height));
+    const double framePixels = static_cast<double>(std::max(1, width)) * static_cast<double>(std::max(1, height));
+    if (requiredRects.empty() ||
+        requiredRects.size() > kMaxBlitRects ||
+        static_cast<double>(renderRectAreaPixels(requiredRects)) > framePixels * kMaxBlitAreaRatio) {
+        return useFull();
+    }
+
+    return requiredRects;
+}
+
+void VulkanRenderBackend::recordRenderCacheBlitHistory(std::uint64_t generation,
+                                                       bool fullSync,
+                                                       const std::vector<core::Rect>& rects) {
+    constexpr std::size_t kMaxHistoryEntries = 32;
+    RenderCacheHistoryEntry entry;
+    entry.generation = generation;
+    entry.full = fullSync;
+    entry.rects = fullSync ? std::vector<core::Rect>{} : rects;
+    renderCacheHistory_.push_back(std::move(entry));
+    while (renderCacheHistory_.size() > kMaxHistoryEntries) {
+        renderCacheHistory_.erase(renderCacheHistory_.begin());
+    }
+}
+
+void VulkanRenderBackend::invalidateRenderCacheSync() {
+    renderCacheGeneration_ = 0;
+    renderCacheHistory_.clear();
+    swapchainImageCacheGenerations_.assign(swapchainImages_.size(), 0);
+    presentDirtyRects_.clear();
+}
+
+void VulkanRenderBackend::setPresentDirtyRects(const std::vector<core::Rect>& rects) {
+    if (!incrementalPresentSupported_) {
+        presentDirtyRects_.clear();
+        return;
+    }
+    presentDirtyRects_ = mergeRenderRects(clampRenderRects(rects,
+                                                           static_cast<int>(swapchainExtent_.width),
+                                                           static_cast<int>(swapchainExtent_.height)));
 }
 
 void VulkanRenderBackend::transitionRenderCacheImage(VkImageLayout newLayout) {
@@ -173,6 +331,14 @@ void VulkanRenderBackend::transitionRenderCacheImage(VkImageLayout newLayout) {
     }
     transitionImageLayout(commandBuffers_[currentImage_], renderCacheImage_, renderCacheLayout_, newLayout);
     renderCacheLayout_ = newLayout;
+}
+
+void VulkanRenderBackend::transitionLayerImage(LayerResource& layer, VkImageLayout newLayout) {
+    if (commandBuffers_.empty() || layer.texture.image == VK_NULL_HANDLE || currentImage_ >= commandBuffers_.size()) {
+        return;
+    }
+    transitionImageLayout(commandBuffers_[currentImage_], layer.texture.image, layer.texture.layout, newLayout);
+    layer.texture.layout = newLayout;
 }
 
 bool VulkanRenderBackend::ensureRenderCacheResolvePipeline() {
@@ -404,6 +570,7 @@ bool VulkanRenderBackend::drawRenderCacheResolve(int width, int height) {
     }
     vkCmdSetScissor(commandBuffers_[currentImage_], 0, 1, &scissor);
     vkCmdDraw(commandBuffers_[currentImage_], 3, 1, 0, 0);
+    ++core::render::currentRenderFrameStats().backendResolveDraws;
     return true;
 }
 
@@ -449,7 +616,10 @@ void VulkanRenderBackend::destroyRenderCacheResources() {
         renderCacheFramebuffer_ = VK_NULL_HANDLE;
         renderCacheLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
         renderCacheExtent_ = {};
+        renderTarget_ = RenderTarget::Swapchain;
         renderingToCache_ = false;
+        activeLayer_ = nullptr;
+        invalidateRenderCacheSync();
         return;
     }
     destroyRenderCacheResolveResources();
@@ -471,7 +641,10 @@ void VulkanRenderBackend::destroyRenderCacheResources() {
     }
     renderCacheLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
     renderCacheExtent_ = {};
+    renderTarget_ = RenderTarget::Swapchain;
     renderingToCache_ = false;
+    activeLayer_ = nullptr;
+    invalidateRenderCacheSync();
 }
 
 } // namespace core::render::vulkan

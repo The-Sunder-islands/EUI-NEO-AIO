@@ -8,16 +8,12 @@
 
 namespace core::dsl {
 
-inline std::vector<const Element*> orderedElements(const std::vector<std::unique_ptr<Element>>& elements) {
-    std::vector<const Element*> ordered;
-    ordered.reserve(elements.size());
-    for (const auto& element : elements) {
-        ordered.push_back(element.get());
-    }
-    std::stable_sort(ordered.begin(), ordered.end(), [](const Element* a, const Element* b) {
-        return a->zIndex < b->zIndex;
-    });
-    return ordered;
+inline const std::vector<const Element*>& orderedElements(const Ui& ui) {
+    return ui.orderedRoots();
+}
+
+inline const std::vector<const Element*>& orderedElements(const Element& element) {
+    return element.orderedChildren;
 }
 
 } // namespace core::dsl

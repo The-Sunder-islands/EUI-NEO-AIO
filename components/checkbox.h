@@ -3,6 +3,7 @@
 #include "components/theme.h"
 #include "core/dsl.h"
 #include "core/render/text.h"
+#include "eui/signal.h"
 
 #include <algorithm>
 #include <functional>
@@ -13,7 +14,7 @@
 namespace components {
 
 struct CheckboxStyle {
-    CheckboxStyle() : CheckboxStyle(theme::DarkThemeColors()) {}
+    CheckboxStyle() : CheckboxStyle(theme::dark()) {}
 
     explicit CheckboxStyle(const theme::ThemeColorTokens& tokens) {
         box = tokens.surface;
@@ -50,6 +51,11 @@ public:
 
     CheckboxBuilder& size(float width, float height) { width_ = width; height_ = height; return *this; }
     CheckboxBuilder& checked(bool value) { checked_ = value; return *this; }
+    CheckboxBuilder& bind(eui::Signal<bool>& signal) {
+        checked(signal.get());
+        onChange([&signal](bool value) { signal.set(value); });
+        return *this;
+    }
     CheckboxBuilder& text(std::string value) { text_ = std::move(value); return *this; }
     CheckboxBuilder& fontSize(float value) { fontSize_ = std::max(1.0f, value); return *this; }
     CheckboxBuilder& boxSize(float value) { boxSize_ = std::max(10.0f, value); return *this; }
@@ -66,7 +72,9 @@ public:
         const float box = std::min(boxSize_, height_);
         const float boxY = (height_ - box) * 0.5f;
         const float labelX = box + gap_;
-        const float labelWidth = std::max(0.0f, width_ - labelX);
+        const float horizontalInset = 10.0f;
+        const float contentX = horizontalInset;
+        const float labelWidth = std::max(0.0f, width_ - labelX - horizontalInset);
         const float labelLineHeight = fontSize_;
         const float labelY = std::max(0.0f, (height_ - labelLineHeight) * 0.5f);
         const float markThickness = std::max(2.0f, box * 0.12f);
@@ -103,8 +111,8 @@ public:
         markTransition.durationSeconds = 0.12f;
         markTransition.ease = core::Ease::OutCubic;
         const float hitWidth = text_.empty()
-            ? box
-            : std::min(width_, labelX + textWidth(text_, fontSize_));
+            ? box + horizontalInset * 2.0f
+            : std::min(width_, labelX + textWidth(text_, fontSize_) + horizontalInset * 2.0f);
         const core::Color idle = checked_ ? style_.checked : style_.box;
         const core::Color hover = checked_ ? style_.checkedHover : style_.boxHover;
         const core::Color pressed = checked_ ? style_.checkedPressed : style_.boxPressed;
@@ -127,6 +135,7 @@ public:
                     .build();
 
                 ui_.rect(id_ + ".box")
+                    .x(contentX)
                     .y(boxY)
                     .size(box, box)
                     .color(idle)
@@ -137,6 +146,7 @@ public:
                     .build();
 
                 ui_.stack(id_ + ".mark.clip")
+                    .x(contentX)
                     .y(boxY)
                     .size(box, box)
                     .clip()
@@ -161,7 +171,7 @@ public:
 
                 if (!text_.empty()) {
                     ui_.text(id_ + ".label")
-                        .x(labelX)
+                        .x(contentX + labelX)
                         .y(labelY)
                         .size(labelWidth, labelLineHeight)
                         .text(text_)

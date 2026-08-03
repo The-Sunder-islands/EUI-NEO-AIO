@@ -11,7 +11,7 @@
 namespace components {
 
 struct ButtonStyle {
-    ButtonStyle() : ButtonStyle(theme::DarkThemeColors()) {}
+    ButtonStyle() : ButtonStyle(theme::dark()) {}
 
     explicit ButtonStyle(const theme::ThemeColorTokens& tokens, bool primary = true) {
         const core::Color base = primary ? tokens.primary : tokens.surface;
@@ -55,13 +55,9 @@ public:
         style_ = ButtonStyle(tokens, primary);
         return *this;
     }
-    ButtonBuilder& primaryTheme(const theme::ThemeColorTokens& tokens) { return theme(tokens, true); }
-    ButtonBuilder& secondaryTheme(const theme::ThemeColorTokens& tokens) { return theme(tokens, false); }
     ButtonBuilder& radius(float value) { style_.radius = value; return *this; }
-    ButtonBuilder& rounding(float value) { return radius(value); }
     ButtonBuilder& opacity(float value) { style_.opacity = std::clamp(value, 0.0f, 1.0f); return *this; }
     ButtonBuilder& disabled(bool value = true) { disabled_ = value; return *this; }
-    ButtonBuilder& enabled(bool value = true) { disabled_ = !value; return *this; }
     ButtonBuilder& translate(float x, float y) { translateX_ = x; translateY_ = y; return *this; }
     ButtonBuilder& translateX(float value) { translateX_ = value; return *this; }
     ButtonBuilder& translateY(float value) { translateY_ = value; return *this; }
@@ -94,9 +90,10 @@ public:
         const float font = fontSize_ > 0.0f ? fontSize_ * scale_ : h * 0.46f;
         const float iconFont = iconSize_ > 0.0f ? iconSize_ * scale_ : font * 0.92f;
         const bool hasIcon = !icon_.empty();
+        const bool hasText = !text_.empty();
         const float iconWidth = hasIcon ? iconFont * 1.15f : 0.0f;
-        const float gap = hasIcon ? std::max(6.0f * scale_, h * 0.12f) : 0.0f;
-        const float labelWidth = hasIcon ? std::max(0.0f, w - iconWidth - gap - 32.0f * scale_) : w;
+        const float gap = hasIcon && hasText ? std::max(6.0f * scale_, h * 0.12f) : 0.0f;
+        const float labelWidth = hasIcon && hasText ? std::max(0.0f, w - iconWidth - gap - 32.0f * scale_) : w;
         core::Border border = style_.border;
         border.width *= scale_;
 
@@ -147,16 +144,18 @@ public:
                                 .build();
                         }
 
-                        ui_.text(id_ + ".text")
-                            .size(labelWidth, h)
-                            .text(text_)
-                            .fontSize(font)
-                            .lineHeight(font)
-                            .color(textColor)
-                            .horizontalAlign(hasIcon ? core::HorizontalAlign::Left : core::HorizontalAlign::Center)
-                            .verticalAlign(core::VerticalAlign::Center)
-                            .transition(transition_)
-                            .build();
+                        if (hasText) {
+                            ui_.text(id_ + ".text")
+                                .size(labelWidth, h)
+                                .text(text_)
+                                .fontSize(font)
+                                .lineHeight(font)
+                                .color(textColor)
+                                .horizontalAlign(hasIcon ? core::HorizontalAlign::Left : core::HorizontalAlign::Center)
+                                .verticalAlign(core::VerticalAlign::Center)
+                                .transition(transition_)
+                                .build();
+                        }
                     })
                     .build();
             })

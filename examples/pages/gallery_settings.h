@@ -63,18 +63,76 @@ struct GallerySettingsPage {
     }
 
     void compose(eui::Ui& ui, float width, float height) {
+        (void)height;
         const float rowWidth = std::max(0.0f, std::min(width, 720.0f));
+        const float sliderWidth = std::max(0.0f, rowWidth - 48.0f);
 
         ui.column("settings.list")
-            .size(rowWidth, std::min(height, 430.0f))
+            .width(rowWidth)
+            .height(eui::SizeValue::wrapContent())
             .gap(14.0f)
             .content([&] {
                 settingRow(ui, "setting.dense", "Dense layout", "Use tighter spacing for gallery pages.", optionDense, rowWidth, [] { optionDense = !optionDense; });
                 settingRow(ui, "setting.glass", "Glass surfaces", "Show transparent panel examples in controls.", optionGlass, rowWidth, [] { optionGlass = !optionGlass; });
                 settingRow(ui, "setting.motion", "Animated transitions", "Keep page and property transitions enabled.", optionMotion, rowWidth, [] { optionMotion = !optionMotion; });
+
+                ui.stack("setting.animationSpeed")
+                    .size(rowWidth, 86.0f)
+                    .content([&] {
+                        ui.rect("setting.animationSpeed.bg")
+                            .size(rowWidth, 86.0f)
+                            .color(surfaceSoft())
+                            .radius(16.0f)
+                            .transition(pageTransition())
+                            .animate(eui::AnimProperty::Color)
+                            .build();
+
+                        ui.text("setting.animationSpeed.title")
+                            .x(24.0f)
+                            .y(12.0f)
+                            .size(std::max(0.0f, rowWidth - 132.0f), 28.0f)
+                            .text("Animation speed")
+                            .fontSize(20.0f)
+                            .lineHeight(26.0f)
+                            .color(textPrimary())
+                            .build();
+
+                        ui.text("setting.animationSpeed.value")
+                            .x(std::max(0.0f, rowWidth - 96.0f))
+                            .y(12.0f)
+                            .size(72.0f, 28.0f)
+                            .text(animationSpeedText())
+                            .fontSize(18.0f)
+                            .lineHeight(24.0f)
+                            .fontWeight(760)
+                            .color(accent())
+                            .horizontalAlign(eui::HorizontalAlign::Right)
+                            .verticalAlign(eui::VerticalAlign::Center)
+                            .transition(textTransition())
+                            .build();
+
+                        ui.stack("setting.animationSpeed.slider.wrap")
+                            .x(24.0f)
+                            .y(48.0f)
+                            .size(sliderWidth, 28.0f)
+                            .content([&] {
+                                components::slider(ui, "setting.animationSpeed.slider")
+                                    .theme(themeColors())
+                                    .size(sliderWidth, 28.0f)
+                                    .value(animationSpeedSliderValue())
+                                    .transition(pageTransition())
+                                    .onChange([](float value) {
+                                        optionAnimationSpeed = animationSpeedFromSlider(value);
+                                    })
+                                    .build();
+                            })
+                            .build();
+                    })
+                    .build();
+
                 settingRow(ui, "setting.unlockFps", "Unlock 90 FPS limit", "Let animation rendering use the display refresh rate.", optionUnlockFps, rowWidth, [] { optionUnlockFps = !optionUnlockFps; });
                 settingRow(ui, "setting.night", "Night mode", "Switch gallery between light and dark theme tokens.", optionNight, rowWidth, [] { optionNight = !optionNight; });
-            });
+            })
+            .build();
     }
 };
-

@@ -3,6 +3,7 @@
 #include "components/theme.h"
 #include "core/dsl.h"
 #include "core/render/text.h"
+#include "eui/signal.h"
 
 #include <algorithm>
 #include <functional>
@@ -12,7 +13,7 @@
 namespace components {
 
 struct SwitchStyle {
-    SwitchStyle() : SwitchStyle(theme::DarkThemeColors()) {}
+    SwitchStyle() : SwitchStyle(theme::dark()) {}
 
     explicit SwitchStyle(const theme::ThemeColorTokens& tokens) {
         off = core::mixColor(tokens.surfaceHover, tokens.surfaceActive, 0.30f);
@@ -38,8 +39,12 @@ public:
 
     SwitchBuilder& size(float width, float height) { width_ = width; height_ = height; return *this; }
     SwitchBuilder& checked(bool value) { checked_ = value; return *this; }
-    SwitchBuilder& label(std::string value) { label_ = std::move(value); return *this; }
-    SwitchBuilder& text(std::string value) { return label(std::move(value)); }
+    SwitchBuilder& bind(eui::Signal<bool>& signal) {
+        checked(signal.get());
+        onChange([&signal](bool value) { signal.set(value); });
+        return *this;
+    }
+    SwitchBuilder& text(std::string value) { label_ = std::move(value); return *this; }
     SwitchBuilder& fontSize(float value) { fontSize_ = std::max(1.0f, value); return *this; }
     SwitchBuilder& trackSize(float width, float height) {
         trackWidth_ = std::max(20.0f, width);
@@ -62,12 +67,14 @@ public:
         const float knobTravel = std::max(0.0f, trackWidth_ - margin * 2.0f - knobSize);
         const float knobX = margin + (checked_ ? knobTravel : 0.0f);
         const float labelX = trackWidth_ + gap_;
-        const float labelWidth = std::max(0.0f, width_ - labelX);
+        const float horizontalInset = 10.0f;
+        const float contentX = horizontalInset;
+        const float labelWidth = std::max(0.0f, width_ - labelX - horizontalInset);
         const float labelLineHeight = fontSize_;
         const float labelY = std::max(0.0f, (height_ - labelLineHeight) * 0.5f);
         const float hitWidth = label_.empty()
-            ? trackWidth_
-            : std::min(width_, labelX + textWidth(label_, fontSize_));
+            ? trackWidth_ + horizontalInset * 2.0f
+            : std::min(width_, labelX + textWidth(label_, fontSize_) + horizontalInset * 2.0f);
         const bool nextChecked = !checked_;
         const std::function<void(bool)> onChange = onChange_;
 
@@ -87,6 +94,7 @@ public:
                     .build();
 
                 ui_.rect(id_ + ".track")
+                    .x(contentX)
                     .y(trackY)
                     .size(trackWidth_, trackHeight_)
                     .color(checked_ ? style_.on : style_.off)
@@ -96,7 +104,7 @@ public:
                     .build();
 
                 ui_.rect(id_ + ".knob")
-                    .x(knobX)
+                    .x(contentX + knobX)
                     .y(trackY + margin)
                     .size(knobSize, knobSize)
                     .color(style_.knob)
@@ -107,7 +115,7 @@ public:
 
                 if (!label_.empty()) {
                     ui_.text(id_ + ".label")
-                        .x(labelX)
+                        .x(contentX + labelX)
                         .y(labelY)
                         .size(labelWidth, labelLineHeight)
                         .text(label_)

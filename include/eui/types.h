@@ -1,14 +1,11 @@
 #pragma once
 
 #include "core/animation.h"
+#include "core/dsl.h"
 #include "core/layout.h"
 #include "core/input/input_types.h"
 #include "core/render/render_types.h"
 #include "core/render/text_types.h"
-
-namespace core::dsl {
-struct DragEvent;
-} // namespace core::dsl
 
 namespace eui {
 
@@ -33,6 +30,7 @@ using TextStyle = core::TextStyle;
 using CursorShape = core::CursorShape;
 using PointerEvent = core::PointerEvent;
 using DragEvent = core::dsl::DragEvent;
+using CanvasContext = core::render::CanvasContext;
 
 inline Color mixColor(const Color& from, const Color& to, float amount) {
     return core::mixColor(from, to, amount);

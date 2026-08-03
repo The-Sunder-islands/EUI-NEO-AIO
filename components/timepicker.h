@@ -2,6 +2,7 @@
 
 #include "components/theme.h"
 #include "core/dsl.h"
+#include "eui/signal.h"
 
 #include <algorithm>
 #include <cmath>
@@ -13,7 +14,7 @@
 namespace components {
 
 struct TimePickerStyle {
-    TimePickerStyle() : TimePickerStyle(theme::DarkThemeColors()) {}
+    TimePickerStyle() : TimePickerStyle(theme::dark()) {}
 
     explicit TimePickerStyle(const theme::ThemeColorTokens& tokens) {
         backdrop = theme::color(0.0f, 0.0f, 0.0f, tokens.dark ? 0.42f : 0.26f);
@@ -49,6 +50,11 @@ public:
         : ui_(ui), id_(std::move(id)) {}
 
     TimePickerBuilder& open(bool value = true) { open_ = value; return *this; }
+    TimePickerBuilder& bindOpen(eui::Signal<bool>& signal) {
+        open(signal.get());
+        onOpenChange([&signal](bool value) { signal.set(value); });
+        return *this;
+    }
     TimePickerBuilder& screen(float width, float height) { screenWidth_ = width; screenHeight_ = height; return *this; }
     TimePickerBuilder& size(float width, float height) { width_ = width; height_ = height; return *this; }
     TimePickerBuilder& time(int hour, int minute) {
@@ -61,7 +67,6 @@ public:
     TimePickerBuilder& theme(const theme::ThemeColorTokens& tokens) { style_ = TimePickerStyle(tokens); return *this; }
     TimePickerBuilder& transition(const core::Transition& value) { transition_ = value; return *this; }
     TimePickerBuilder& zIndex(int value) { zIndex_ = value; return *this; }
-    TimePickerBuilder& z(int value) { return zIndex(value); }
     TimePickerBuilder& onChange(std::function<void(int, int)> callback) { onChange_ = std::move(callback); return *this; }
     TimePickerBuilder& onOpenChange(std::function<void(bool)> callback) { onOpenChange_ = std::move(callback); return *this; }
 
@@ -316,8 +321,8 @@ private:
             .y(18.0f)
             .size(62.0f, 30.0f)
             .text("Done")
-            .fontSize(13.0f)
-            .lineHeight(16.0f)
+            .fontSize(15.0f)
+            .lineHeight(18.0f)
             .color(theme::color(1.0f, 1.0f, 1.0f))
             .horizontalAlign(core::HorizontalAlign::Center)
             .verticalAlign(core::VerticalAlign::Center)
@@ -422,7 +427,7 @@ private:
     int zIndex_ = 1000;
 };
 
-inline TimePickerBuilder timepicker(core::dsl::Ui& ui, const std::string& id) {
+inline TimePickerBuilder timePicker(core::dsl::Ui& ui, const std::string& id) {
     return TimePickerBuilder(ui, id);
 }
 

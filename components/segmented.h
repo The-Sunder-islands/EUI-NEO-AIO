@@ -2,6 +2,7 @@
 
 #include "components/theme.h"
 #include "core/dsl.h"
+#include "eui/signal.h"
 
 #include <algorithm>
 #include <functional>
@@ -12,7 +13,7 @@
 namespace components {
 
 struct SegmentedStyle {
-    SegmentedStyle() : SegmentedStyle(theme::DarkThemeColors()) {}
+    SegmentedStyle() : SegmentedStyle(theme::dark()) {}
 
     explicit SegmentedStyle(const theme::ThemeColorTokens& tokens) {
         background = tokens.surface;
@@ -39,6 +40,11 @@ public:
     SegmentedBuilder& size(float width, float height) { width_ = width; height_ = height; return *this; }
     SegmentedBuilder& items(std::vector<std::string> value) { items_ = std::move(value); return *this; }
     SegmentedBuilder& selected(int value) { selected_ = value; return *this; }
+    SegmentedBuilder& bind(eui::Signal<int>& signal) {
+        selected(signal.get());
+        onChange([&signal](int value) { signal.set(value); });
+        return *this;
+    }
     SegmentedBuilder& fontSize(float value) { fontSize_ = std::max(1.0f, value); return *this; }
     SegmentedBuilder& style(const SegmentedStyle& value) { style_ = value; return *this; }
     SegmentedBuilder& theme(const theme::ThemeColorTokens& tokens) { style_ = SegmentedStyle(tokens); return *this; }

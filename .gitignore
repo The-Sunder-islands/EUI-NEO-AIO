@@ -1,12 +1,11 @@
 /build
 /build-*/
+/build_*/
 /build-sdl2
 /参考
 /build-check
 .DS_Store
 /docs/releases/
+/tmp/
 /temp/
-android/.gradle/
-android/local.properties
-android/app/build/
-android/app/.cxx/
+/.github/skills/

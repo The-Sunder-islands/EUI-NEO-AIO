@@ -95,6 +95,26 @@ struct Transition {
     }
 };
 
+inline float& transitionDurationScaleStorage() {
+    static float value = 1.0f;
+    return value;
+}
+
+inline void setGlobalTransitionDurationScale(float value) {
+    transitionDurationScaleStorage() = std::clamp(value, 0.05f, 8.0f);
+}
+
+inline float globalTransitionDurationScale() {
+    return transitionDurationScaleStorage();
+}
+
+inline Transition scaledTransition(Transition transition) {
+    const float scale = globalTransitionDurationScale();
+    transition.durationSeconds *= scale;
+    transition.delaySeconds *= scale;
+    return transition;
+}
+
 inline float applyEase(Ease ease, float t) {
     t = std::clamp(t, 0.0f, 1.0f);
     switch (ease) {
@@ -275,7 +295,7 @@ public:
         }
 
         start_ = current_;
-        spec_ = transition;
+        spec_ = scaledTransition(transition);
         elapsedSeconds_ = 0.0f;
         active_ = true;
         return true;

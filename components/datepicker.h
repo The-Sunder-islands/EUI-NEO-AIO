@@ -2,6 +2,7 @@
 
 #include "components/theme.h"
 #include "core/dsl.h"
+#include "eui/signal.h"
 
 #include <algorithm>
 #include <array>
@@ -15,7 +16,7 @@
 namespace components {
 
 struct DatePickerStyle {
-    DatePickerStyle() : DatePickerStyle(theme::DarkThemeColors()) {}
+    DatePickerStyle() : DatePickerStyle(theme::dark()) {}
 
     explicit DatePickerStyle(const theme::ThemeColorTokens& tokens) {
         backdrop = theme::color(0.0f, 0.0f, 0.0f, tokens.dark ? 0.42f : 0.26f);
@@ -51,6 +52,11 @@ public:
         : ui_(ui), id_(std::move(id)) {}
 
     DatePickerBuilder& open(bool value = true) { open_ = value; return *this; }
+    DatePickerBuilder& bindOpen(eui::Signal<bool>& signal) {
+        open(signal.get());
+        onOpenChange([&signal](bool value) { signal.set(value); });
+        return *this;
+    }
     DatePickerBuilder& screen(float width, float height) { screenWidth_ = width; screenHeight_ = height; return *this; }
     DatePickerBuilder& size(float width, float height) { width_ = width; height_ = height; return *this; }
     DatePickerBuilder& date(int year, int month, int day) {
@@ -63,7 +69,6 @@ public:
     DatePickerBuilder& theme(const theme::ThemeColorTokens& tokens) { style_ = DatePickerStyle(tokens); return *this; }
     DatePickerBuilder& transition(const core::Transition& value) { transition_ = value; return *this; }
     DatePickerBuilder& zIndex(int value) { zIndex_ = value; return *this; }
-    DatePickerBuilder& z(int value) { return zIndex(value); }
     DatePickerBuilder& onChange(std::function<void(int, int, int)> callback) { onChange_ = std::move(callback); return *this; }
     DatePickerBuilder& onOpenChange(std::function<void(bool)> callback) { onOpenChange_ = std::move(callback); return *this; }
 
@@ -323,8 +328,8 @@ private:
             .y(18.0f)
             .size(62.0f, 30.0f)
             .text("Done")
-            .fontSize(13.0f)
-            .lineHeight(16.0f)
+            .fontSize(15.0f)
+            .lineHeight(18.0f)
             .color(theme::color(1.0f, 1.0f, 1.0f))
             .horizontalAlign(core::HorizontalAlign::Center)
             .verticalAlign(core::VerticalAlign::Center)
@@ -429,7 +434,7 @@ private:
     int zIndex_ = 1000;
 };
 
-inline DatePickerBuilder datepicker(core::dsl::Ui& ui, const std::string& id) {
+inline DatePickerBuilder datePicker(core::dsl::Ui& ui, const std::string& id) {
     return DatePickerBuilder(ui, id);
 }
 

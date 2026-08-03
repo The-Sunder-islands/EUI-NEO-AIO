@@ -3,6 +3,7 @@
 #include "components/slider.h"
 #include "components/theme.h"
 #include "core/dsl.h"
+#include "eui/signal.h"
 
 #include <algorithm>
 #include <cmath>
@@ -16,7 +17,7 @@
 namespace components {
 
 struct ColorPickerStyle {
-    ColorPickerStyle() : ColorPickerStyle(theme::DarkThemeColors()) {}
+    ColorPickerStyle() : ColorPickerStyle(theme::dark()) {}
 
     explicit ColorPickerStyle(const theme::ThemeColorTokens& tokens) {
         backdrop = theme::color(0.0f, 0.0f, 0.0f, tokens.dark ? 0.42f : 0.26f);
@@ -52,15 +53,24 @@ public:
         : ui_(ui), id_(std::move(id)) {}
 
     ColorPickerBuilder& open(bool value = true) { open_ = value; return *this; }
+    ColorPickerBuilder& bindOpen(eui::Signal<bool>& signal) {
+        open(signal.get());
+        onOpenChange([&signal](bool value) { signal.set(value); });
+        return *this;
+    }
     ColorPickerBuilder& screen(float width, float height) { screenWidth_ = width; screenHeight_ = height; return *this; }
     ColorPickerBuilder& size(float width, float height) { width_ = width; height_ = height; return *this; }
     ColorPickerBuilder& value(core::Color value) { value_ = clampColor(value); return *this; }
+    ColorPickerBuilder& bind(eui::Signal<core::Color>& signal) {
+        value(signal.get());
+        onChange([&signal](core::Color value) { signal.set(value); });
+        return *this;
+    }
     ColorPickerBuilder& colors(std::vector<core::Color> value) { colors_ = std::move(value); return *this; }
     ColorPickerBuilder& style(const ColorPickerStyle& value) { style_ = value; return *this; }
     ColorPickerBuilder& theme(const theme::ThemeColorTokens& tokens) { style_ = ColorPickerStyle(tokens); return *this; }
     ColorPickerBuilder& transition(const core::Transition& value) { transition_ = value; return *this; }
     ColorPickerBuilder& zIndex(int value) { zIndex_ = value; return *this; }
-    ColorPickerBuilder& z(int value) { return zIndex(value); }
     ColorPickerBuilder& onChange(std::function<void(core::Color)> callback) { onChange_ = std::move(callback); return *this; }
     ColorPickerBuilder& onOpenChange(std::function<void(bool)> callback) { onOpenChange_ = std::move(callback); return *this; }
 
@@ -269,8 +279,8 @@ private:
             .y(18.0f)
             .size(62.0f, 30.0f)
             .text("Done")
-            .fontSize(13.0f)
-            .lineHeight(16.0f)
+            .fontSize(15.0f)
+            .lineHeight(18.0f)
             .color(theme::color(1.0f, 1.0f, 1.0f))
             .horizontalAlign(core::HorizontalAlign::Center)
             .verticalAlign(core::VerticalAlign::Center)
@@ -412,7 +422,7 @@ private:
     int zIndex_ = 1000;
 };
 
-inline ColorPickerBuilder colorpicker(core::dsl::Ui& ui, const std::string& id) {
+inline ColorPickerBuilder colorPicker(core::dsl::Ui& ui, const std::string& id) {
     return ColorPickerBuilder(ui, id);
 }
 

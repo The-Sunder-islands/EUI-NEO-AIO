@@ -3,6 +3,10 @@
 #include "core/render/render_backend.h"
 #include "core/window/window_types.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <vector>
+
 namespace core::render::opengl {
 
 class OpenGLRenderBackend final : public RenderBackend {
@@ -22,13 +26,25 @@ public:
     bool ensureRenderCache(int width, int height) override;
     bool renderCacheWasRecreated() const override;
     void releaseRenderCache() override;
-    void beginRenderCacheFrame(int width, int height) override;
+    void beginRenderCacheFrame(int width,
+                               int height,
+                               const std::vector<core::Rect>& repaintRects = {}) override;
     void endRenderCacheFrame() override;
-    void blitRenderCache(int width, int height) override;
+    void blitRenderCache(int width,
+                         int height,
+                         RenderCacheBlitMode mode = RenderCacheBlitMode::Full,
+                         const std::vector<core::Rect>& dirtyRects = {}) override;
+    LayerHandle createLayer(int width, int height) override;
+    bool resizeLayer(LayerHandle layer, int width, int height) override;
+    void destroyLayer(LayerHandle layer) override;
+    bool beginLayerFrame(LayerHandle layer, int width, int height) override;
+    void endLayerFrame() override;
+    TextureHandle layerTexture(LayerHandle layer) override;
     void clear(const core::Color& color) override;
     void setScissor(bool enabled, const core::Rect& rect, int framebufferHeight) override;
     void prepareBackdropBlur(const core::Rect& bounds, float blur, int windowWidth, int windowHeight) override;
     void drawRoundedRect(const RoundedRectDrawCommand& command, int windowWidth, int windowHeight) override;
+    void drawPolygon(const PolygonDrawCommand& command, int windowWidth, int windowHeight) override;
     void drawText(const TextDrawCommand& command, int windowWidth, int windowHeight) override;
     TextureHandle createTexture(const unsigned char* pixels, int width, int height) override;
     bool updateTexture(TextureHandle handle, const unsigned char* pixels, int width, int height) override;
@@ -41,9 +57,17 @@ public:
                      float radius,
                      int windowWidth,
                      int windowHeight) override;
+    void drawLayerTexture(TextureHandle handle,
+                          const float* vertices,
+                          std::size_t vertexFloatCount,
+                          const core::Rect& rect,
+                          int windowWidth,
+                          int windowHeight) override;
 
 private:
     void releasePrimitiveResources();
+    void releasePolygonResources();
+    void releaseTextResources();
     bool ensureImageResources();
     unsigned int compileImageShader(unsigned int type, const char* source) const;
     void releaseImageResources();
@@ -55,16 +79,39 @@ private:
     void bindTexture2D(unsigned int texture);
     void setBlendEnabled(bool enabled);
     void setStandardAlphaBlend();
+    void setPremultipliedAlphaBlend();
+    std::vector<core::Rect> resolveRenderCacheBlitRects(int width,
+                                                        int height,
+                                                        RenderCacheBlitMode mode,
+                                                        const std::vector<core::Rect>& dirtyRects);
+    void recordRenderCacheBlitHistory(std::uint64_t generation, bool fullSync, const std::vector<core::Rect>& rects);
+    void invalidateRenderCacheSync();
 
     core::window::Handle window_ = nullptr;
     RenderBackend* shareContext_ = nullptr;
     void* context_ = nullptr;
     bool initialized_ = false;
+    bool damagePresentSupported_ = false;
     unsigned int cacheFramebuffer_ = 0;
     unsigned int cacheTexture_ = 0;
     int cacheWidth_ = 0;
     int cacheHeight_ = 0;
     bool cacheRecreated_ = false;
+    int framebufferWidth_ = 0;
+    int framebufferHeight_ = 0;
+    int layerPreviousFramebuffer_ = 0;
+    int layerPreviousViewport_[4] = {};
+    bool layerFrameActive_ = false;
+    core::Rect cacheRenderArea_{};
+    struct RenderCacheHistoryEntry {
+        std::uint64_t generation = 0;
+        bool full = false;
+        std::vector<core::Rect> rects;
+    };
+    std::uint64_t renderCacheGeneration_ = 0;
+    std::vector<std::uint64_t> backbufferCacheGenerations_{0, 0};
+    std::vector<RenderCacheHistoryEntry> renderCacheHistory_;
+    std::size_t currentBackbuffer_ = 0;
     unsigned int imageVao_ = 0;
     unsigned int imageVbo_ = 0;
     unsigned int imageShaderProgram_ = 0;

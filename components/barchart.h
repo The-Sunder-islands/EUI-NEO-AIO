@@ -1,6 +1,7 @@
 #pragma once
 
 #include "components/theme.h"
+#include "components/tooltip.h"
 #include "core/dsl.h"
 
 #include <algorithm>
@@ -11,7 +12,7 @@
 namespace components {
 
 struct BarChartStyle {
-    BarChartStyle() : BarChartStyle(theme::DarkThemeColors()) {}
+    BarChartStyle() : BarChartStyle(theme::dark()) {}
 
     explicit BarChartStyle(const theme::ThemeColorTokens& tokens) {
         background = tokens.surface;
@@ -155,7 +156,13 @@ public:
                 }
 
                 for (const TooltipItem& item : tooltips) {
-                    tooltip(item.sourceId, item.text, item.x, item.y);
+                    components::tooltip(ui_, item.sourceId + ".tooltip")
+                        .source(item.sourceId)
+                        .value(item.text)
+                        .anchor(item.x, item.y)
+                        .bounds(width_, height_)
+                        .style(tooltipStyle())
+                        .build();
                 }
             })
             .build();
@@ -173,71 +180,12 @@ private:
         return std::to_string(static_cast<int>(std::clamp(value, 0.0f, 1.0f) * 100.0f + 0.5f)) + "%";
     }
 
-    void tooltip(const std::string& sourceId, const std::string& value, float anchorX, float anchorY) {
-        const float tooltipWidth = std::min(112.0f, std::max(86.0f, width_ - 42.0f));
-        const float tooltipHeight = 32.0f;
-        const float pointerHeight = 8.0f;
-        const float pointerHalfWidth = 7.0f;
-        const float stackHeight = tooltipHeight + pointerHeight;
-        const float tooltipGap = 0.0f;
-        const float tooltipX = std::clamp(anchorX - tooltipWidth * 0.5f, 12.0f, std::max(12.0f, width_ - tooltipWidth - 12.0f));
-        const bool belowAnchor = anchorY - stackHeight - tooltipGap < 46.0f;
-        const float wantedY = belowAnchor ? anchorY + tooltipGap : anchorY - stackHeight - tooltipGap;
-        const float tooltipY = std::clamp(wantedY, 44.0f, std::max(44.0f, height_ - stackHeight - 14.0f));
-        const float panelY = belowAnchor ? pointerHeight : 0.0f;
-        const float pointerY = belowAnchor ? 0.0f : tooltipHeight;
-        const float pointerX = std::clamp(anchorX - tooltipX, pointerHalfWidth + 4.0f, tooltipWidth - pointerHalfWidth - 4.0f);
-        const std::string tooltipId = sourceId + ".tooltip";
-        ui_.stack(tooltipId)
-            .x(tooltipX)
-            .y(tooltipY)
-            .size(tooltipWidth, stackHeight)
-            .hoverOpacityFrom(sourceId)
-            .content([&] {
-                ui_.rect(tooltipId + ".bg")
-                    .y(panelY)
-                    .size(tooltipWidth, tooltipHeight)
-                    .color(style_.tooltipBackground)
-                    .radius(9.0f)
-                    .border(1.0f, style_.border)
-                    .shadow(12.0f, 0.0f, 4.0f, theme::color(0.0f, 0.0f, 0.0f, 0.16f))
-                    .build();
-
-                std::vector<core::Vec2> pointerPoints;
-                if (belowAnchor) {
-                    pointerPoints = {
-                        {pointerX, 0.0f},
-                        {pointerX + pointerHalfWidth, pointerHeight},
-                        {pointerX - pointerHalfWidth, pointerHeight}
-                    };
-                } else {
-                    pointerPoints = {
-                        {pointerX - pointerHalfWidth, 0.0f},
-                        {pointerX + pointerHalfWidth, 0.0f},
-                        {pointerX, pointerHeight}
-                    };
-                }
-                ui_.polygon(tooltipId + ".pointer")
-                    .x(0.0f)
-                    .y(pointerY)
-                    .size(tooltipWidth, pointerHeight)
-                    .points(pointerPoints)
-                    .color(style_.tooltipBackground)
-                    .build();
-
-                ui_.text(tooltipId + ".text")
-                    .x(10.0f)
-                    .y(panelY)
-                    .size(std::max(0.0f, tooltipWidth - 20.0f), tooltipHeight)
-                    .text(value)
-                    .fontSize(13.0f)
-                    .lineHeight(16.0f)
-                    .color(style_.tooltipText)
-                    .horizontalAlign(core::HorizontalAlign::Center)
-                    .verticalAlign(core::VerticalAlign::Center)
-                    .build();
-            })
-            .build();
+    TooltipStyle tooltipStyle() const {
+        TooltipStyle result;
+        result.background = style_.tooltipBackground;
+        result.text = style_.tooltipText;
+        result.border = style_.border;
+        return result;
     }
 
     core::dsl::Ui& ui_;
@@ -250,10 +198,6 @@ private:
     float width_ = 206.0f;
     float height_ = 236.0f;
 };
-
-inline BarChartBuilder barchart(core::dsl::Ui& ui, const std::string& id) {
-    return BarChartBuilder(ui, id);
-}
 
 inline BarChartBuilder barChart(core::dsl::Ui& ui, const std::string& id) {
     return BarChartBuilder(ui, id);

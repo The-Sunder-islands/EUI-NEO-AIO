@@ -5,6 +5,7 @@
 
 #include "3rd/stb_image.h"
 #include "core/dsl_runtime.h"
+#include "core/platform/platform.h"
 #include "core/render/text.h"
 
 #include <algorithm>
@@ -144,7 +145,7 @@ void openWindow(const DslWindowConfig& config, DslWindowCompose composeFn) {
     request.modal = config.modalValue;
     request.compose = std::move(composeFn);
     detail::dslWindowRequests().push_back(std::move(request));
-    core::window::postEmptyEvent();
+    requestUpdate();
 }
 
 void openWindow(const char* title, int width, int height, DslWindowCompose composeFn) {
@@ -199,6 +200,19 @@ const char* trayIconPath() {
         : config.iconPathValue;
 }
 
+void requestUpdate() {
+    core::platform::requestUiUpdate();
+}
+
+namespace detail {
+
+void requestFullPaint() {
+    dslRuntime().requestFullPaint();
+    core::platform::requestUiUpdate();
+}
+
+} // namespace detail
+
 bool initialize(core::window::Handle window) {
     const DslAppConfig& config = dslAppConfig();
     core::TextPrimitive::setDefaultFontFiles(
@@ -215,14 +229,15 @@ bool initialize(core::window::Handle window) {
 
 bool update(core::window::Handle window, float deltaSeconds, int windowWidth, int windowHeight, float dpiScale, float pointerScale) {
     const bool asyncReady = core::async::dispatchReady();
-    return update(window, deltaSeconds, windowWidth, windowHeight, dpiScale, pointerScale, eui::network::consumeAnyTextReady() || asyncReady);
+    const bool updateRequested = core::platform::consumeUiUpdate();
+    return update(window, deltaSeconds, windowWidth, windowHeight, dpiScale, pointerScale, updateRequested || asyncReady);
 }
 
-bool update(core::window::Handle window, float deltaSeconds, int windowWidth, int windowHeight, float dpiScale, float pointerScale, bool externalReady) {
-    return update(window, deltaSeconds, windowWidth, windowHeight, dpiScale, pointerScale, externalReady, true);
+bool update(core::window::Handle window, float deltaSeconds, int windowWidth, int windowHeight, float dpiScale, float pointerScale, bool updateRequested) {
+    return update(window, deltaSeconds, windowWidth, windowHeight, dpiScale, pointerScale, updateRequested, true);
 }
 
-bool update(core::window::Handle window, float deltaSeconds, int windowWidth, int windowHeight, float dpiScale, float pointerScale, bool externalReady, bool inputEnabled) {
+bool update(core::window::Handle window, float deltaSeconds, int windowWidth, int windowHeight, float dpiScale, float pointerScale, bool updateRequested, bool inputEnabled) {
     if (windowWidth <= 0 || windowHeight <= 0 || dpiScale <= 0.0f) {
         return false;
     }
@@ -246,14 +261,13 @@ bool update(core::window::Handle window, float deltaSeconds, int windowWidth, in
     }
 
     bool changed = false;
-    if (externalReady) {
+    if (updateRequested) {
         composeFrame();
-        detail::dslRuntime().markFullRedraw();
         changed = true;
     }
 
     changed = detail::dslRuntime().update(window, deltaSeconds, pointerScale, dpiScale, inputEnabled) || changed;
-    if (detail::dslRuntime().needsCompose()) {
+    if (detail::dslRuntime().composeRequested()) {
         composeFrame();
         changed = detail::dslRuntime().update(window, 0.0f, pointerScale, dpiScale, inputEnabled) || changed;
         changed = true;
@@ -283,14 +297,6 @@ void shutdown() {
     core::async::shutdown();
     detail::dslRuntime().shutdown();
     eui::network::shutdown();
-}
-
-// Invalidate the composed state so the next frame triggers a full recompose.
-// Called after Android surface recreation to rebuild the UI tree in the new
-// GL context. Unlike resetRuntime(), this preserves the runtime's internal
-// caches (glyph atlas, font handles) which are recreated on demand.
-void invalidateCompose() {
-    detail::dslAppState().composed = false;
 }
 
 } // namespace app

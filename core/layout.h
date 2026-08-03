@@ -95,6 +95,7 @@ public:
     void setMaxHeight(float value) { maxHeight_ = value > 0.0f ? value : std::numeric_limits<float>::max(); }
     void setFlexGrow(float value) { flexGrow_ = std::max(0.0f, value); }
     void setFlexShrink(float value) { flexShrink_ = std::max(0.0f, value); }
+    void setIgnoreLayout(bool value) { ignoreLayout_ = value; }
     void setPosition(float x, float y, bool hasX, bool hasY) {
         x_ = x;
         y_ = y;
@@ -116,6 +117,7 @@ public:
     float measuredHeight() const { return measuredHeight_; }
     float flexGrow() const { return flexGrow_; }
     float flexShrink() const { return flexShrink_; }
+    bool ignoreLayout() const { return ignoreLayout_; }
     const std::vector<std::unique_ptr<Node>>& children() const { return children_; }
 
     void measure(float availableWidth = 0.0f, float availableHeight = 0.0f) {
@@ -124,17 +126,20 @@ public:
 
 private:
     void measure(float availableWidth, float availableHeight, bool forceWidth, bool forceHeight) {
-        const float innerAvailableWidth = availableWidth > 0.0f
-            ? std::max(0.0f, availableWidth - padding_.left - padding_.right)
+        const float constrainedWidth = measureConstraint(width_, availableWidth, minWidth_, maxWidth_, forceWidth);
+        const float constrainedHeight = measureConstraint(height_, availableHeight, minHeight_, maxHeight_, forceHeight);
+        const float innerAvailableWidth = constrainedWidth > 0.0f
+            ? std::max(0.0f, constrainedWidth - padding_.left - padding_.right)
             : 0.0f;
-        const float innerAvailableHeight = availableHeight > 0.0f
-            ? std::max(0.0f, availableHeight - padding_.top - padding_.bottom)
+        const float innerAvailableHeight = constrainedHeight > 0.0f
+            ? std::max(0.0f, constrainedHeight - padding_.top - padding_.bottom)
             : 0.0f;
 
         const LayoutRect content = measureContent(innerAvailableWidth, innerAvailableHeight);
         measuredWidth_ = resolveSize(width_, content.width + padding_.left + padding_.right, availableWidth, minWidth_, maxWidth_, forceWidth);
         measuredHeight_ = resolveSize(height_, content.height + padding_.top + padding_.bottom, availableHeight, minHeight_, maxHeight_, forceHeight);
 
+        remeasureResolvedOverlayChildren();
         if (type_ == LayoutType::Stack) {
             remeasureStackFillChildren();
         }
@@ -180,6 +185,23 @@ private:
             resolved = availableSize > 0.0f ? availableSize : contentSize;
         }
         return clampSize(resolved, minValue, maxValue);
+    }
+
+    static float measureConstraint(const SizeValue& size,
+                                   float availableSize,
+                                   float minValue,
+                                   float maxValue,
+                                   bool forceAvailable) {
+        if (forceAvailable && availableSize > 0.0f) {
+            return clampSize(availableSize, minValue, maxValue);
+        }
+        if (size.mode == SizeMode::Fixed) {
+            return clampSize(size.value, minValue, maxValue);
+        }
+        if (size.mode == SizeMode::Fill && availableSize > 0.0f) {
+            return clampSize(availableSize, minValue, maxValue);
+        }
+        return availableSize;
     }
 
     static float outerWidth(const Node& node) {
@@ -247,11 +269,19 @@ private:
         float maxHeight = 0.0f;
         float maxWidth = 0.0f;
         for (const auto& child : children_) {
-            child->measure(availableWidth, availableHeight);
+            if (child->ignoreLayout_) {
+                continue;
+            }
+            const bool fillWidth = child->width_.mode == SizeMode::Fill;
+            const bool fillHeight = child->height_.mode == SizeMode::Fill;
+            child->measure(fillWidth ? 0.0f : availableWidth,
+                           fillHeight ? 0.0f : availableHeight);
             const float childX = child->hasX_ ? std::max(0.0f, child->x_) : 0.0f;
             const float childY = child->hasY_ ? std::max(0.0f, child->y_) : 0.0f;
-            maxWidth = std::max(maxWidth, childX + outerWidth(*child));
-            maxHeight = std::max(maxHeight, childY + outerHeight(*child));
+            const float childOuterWidth = fillWidth ? child->margin_.left + child->margin_.right : outerWidth(*child);
+            const float childOuterHeight = fillHeight ? child->margin_.top + child->margin_.bottom : outerHeight(*child);
+            maxWidth = std::max(maxWidth, childX + childOuterWidth);
+            maxHeight = std::max(maxHeight, childY + childOuterHeight);
         }
         return {0.0f, 0.0f, maxWidth, maxHeight};
     }
@@ -264,6 +294,9 @@ private:
 
         for (size_t i = 0; i < children_.size(); ++i) {
             Node& child = *children_[i];
+            if (child.ignoreLayout_) {
+                continue;
+            }
             const bool flexible = isFlexibleAlongRow(child);
             child.measure(flexible ? 0.0f : availableWidth, availableHeight);
             baseTotal += childBaseMainSize(child, true) + child.margin_.left + child.margin_.right;
@@ -274,7 +307,7 @@ private:
             if (child.flexShrink_ > 0.0f) {
                 shrinkWeight += child.flexShrink_;
             }
-            if (i + 1 < children_.size()) {
+            if (hasNextLayoutChild(i)) {
                 baseTotal += spacing_;
             }
         }
@@ -283,6 +316,9 @@ private:
         if ((remaining > 0.0f && growWeight > 0.0f) || (remaining < 0.0f && shrinkWeight > 0.0f)) {
             for (Node& childRef : derefChildren()) {
                 Node& child = childRef;
+                if (child.ignoreLayout_) {
+                    continue;
+                }
                 const bool flexible = isFlexibleAlongRow(child);
                 if (!flexible && !(remaining < 0.0f && child.flexShrink_ > 0.0f)) {
                     continue;
@@ -300,11 +336,16 @@ private:
         }
 
         float contentWidth = 0.0f;
+        bool hasLayoutChild = false;
         for (size_t i = 0; i < children_.size(); ++i) {
-            contentWidth += outerWidth(*children_[i]);
-            if (i + 1 < children_.size()) {
+            if (children_[i]->ignoreLayout_) {
+                continue;
+            }
+            if (hasLayoutChild) {
                 contentWidth += spacing_;
             }
+            contentWidth += outerWidth(*children_[i]);
+            hasLayoutChild = true;
         }
         return {0.0f, 0.0f, contentWidth, contentHeight};
     }
@@ -317,6 +358,9 @@ private:
 
         for (size_t i = 0; i < children_.size(); ++i) {
             Node& child = *children_[i];
+            if (child.ignoreLayout_) {
+                continue;
+            }
             const bool flexible = isFlexibleAlongColumn(child);
             child.measure(availableWidth, flexible ? 0.0f : availableHeight);
             baseTotal += childBaseMainSize(child, false) + child.margin_.top + child.margin_.bottom;
@@ -327,7 +371,7 @@ private:
             if (child.flexShrink_ > 0.0f) {
                 shrinkWeight += child.flexShrink_;
             }
-            if (i + 1 < children_.size()) {
+            if (hasNextLayoutChild(i)) {
                 baseTotal += spacing_;
             }
         }
@@ -336,6 +380,9 @@ private:
         if ((remaining > 0.0f && growWeight > 0.0f) || (remaining < 0.0f && shrinkWeight > 0.0f)) {
             for (Node& childRef : derefChildren()) {
                 Node& child = childRef;
+                if (child.ignoreLayout_) {
+                    continue;
+                }
                 const bool flexible = isFlexibleAlongColumn(child);
                 if (!flexible && !(remaining < 0.0f && child.flexShrink_ > 0.0f)) {
                     continue;
@@ -353,11 +400,16 @@ private:
         }
 
         float contentHeight = 0.0f;
+        bool hasLayoutChild = false;
         for (size_t i = 0; i < children_.size(); ++i) {
-            contentHeight += outerHeight(*children_[i]);
-            if (i + 1 < children_.size()) {
+            if (children_[i]->ignoreLayout_) {
+                continue;
+            }
+            if (hasLayoutChild) {
                 contentHeight += spacing_;
             }
+            contentHeight += outerHeight(*children_[i]);
+            hasLayoutChild = true;
         }
         return {0.0f, 0.0f, contentWidth, contentHeight};
     }
@@ -370,6 +422,9 @@ private:
         bool hasLine = false;
 
         for (const auto& child : children_) {
+            if (child->ignoreLayout_) {
+                continue;
+            }
             child->measure(availableWidth, availableHeight);
             const float childWidth = outerWidth(*child);
             const float childHeight = outerHeight(*child);
@@ -394,6 +449,29 @@ private:
             totalHeight += lineHeight;
         }
         return {0.0f, 0.0f, maxLineWidth, totalHeight};
+    }
+
+    void remeasureResolvedOverlayChildren() {
+        if (children_.empty()) {
+            return;
+        }
+
+        const float availableWidth = innerSpan(measuredWidth_, padding_.left, padding_.right);
+        const float availableHeight = innerSpan(measuredHeight_, padding_.top, padding_.bottom);
+        for (const auto& child : children_) {
+            if (!child->ignoreLayout_) {
+                continue;
+            }
+
+            const bool fillWidth = child->width_.mode == SizeMode::Fill;
+            const bool fillHeight = child->height_.mode == SizeMode::Fill;
+            const float childAvailableWidth = std::max(0.0f, availableWidth - child->margin_.left - child->margin_.right);
+            const float childAvailableHeight = std::max(0.0f, availableHeight - child->margin_.top - child->margin_.bottom);
+            child->measure(fillWidth ? childAvailableWidth : 0.0f,
+                           fillHeight ? childAvailableHeight : 0.0f,
+                           fillWidth,
+                           fillHeight);
+        }
     }
 
     void remeasureStackFillChildren() {
@@ -441,24 +519,57 @@ private:
 
     float rowTotalWidth() const {
         float total = 0.0f;
+        bool hasLayoutChild = false;
         for (size_t i = 0; i < children_.size(); ++i) {
-            total += outerWidth(*children_[i]);
-            if (i + 1 < children_.size()) {
+            if (children_[i]->ignoreLayout_) {
+                continue;
+            }
+            if (hasLayoutChild) {
                 total += spacing_;
             }
+            total += outerWidth(*children_[i]);
+            hasLayoutChild = true;
         }
         return total;
     }
 
     float columnTotalHeight() const {
         float total = 0.0f;
+        bool hasLayoutChild = false;
         for (size_t i = 0; i < children_.size(); ++i) {
-            total += outerHeight(*children_[i]);
-            if (i + 1 < children_.size()) {
+            if (children_[i]->ignoreLayout_) {
+                continue;
+            }
+            if (hasLayoutChild) {
                 total += spacing_;
             }
+            total += outerHeight(*children_[i]);
+            hasLayoutChild = true;
         }
         return total;
+    }
+
+    bool hasNextLayoutChild(size_t index) const {
+        for (size_t next = index + 1; next < children_.size(); ++next) {
+            if (!children_[next]->ignoreLayout_) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void layoutOverlayChildren() {
+        for (const auto& child : children_) {
+            if (!child->ignoreLayout_) {
+                continue;
+            }
+
+            const float childOuterWidth = outerWidth(*child);
+            const float childOuterHeight = outerHeight(*child);
+            const float childX = frame_.x + padding_.left + (child->hasX_ ? child->x_ : crossOffset(innerWidth(), childOuterWidth)) + child->margin_.left;
+            const float childY = frame_.y + padding_.top + (child->hasY_ ? child->y_ : mainOffset(innerHeight(), childOuterHeight)) + child->margin_.top;
+            child->layout(childX, childY);
+        }
     }
 
     void layoutRow() {
@@ -466,6 +577,9 @@ private:
         float cursorX = frame_.x + padding_.left + mainOffset(innerWidth(), contentWidth);
 
         for (const auto& child : children_) {
+            if (child->ignoreLayout_) {
+                continue;
+            }
             const float childOuterHeight = outerHeight(*child);
             const float childX = cursorX + child->margin_.left;
             const float childY = frame_.y + padding_.top + crossOffset(innerHeight(), childOuterHeight) + child->margin_.top;
@@ -473,6 +587,7 @@ private:
             child->layout(childX, childY);
             cursorX += outerWidth(*child) + spacing_;
         }
+        layoutOverlayChildren();
     }
 
     void layoutColumn() {
@@ -480,6 +595,9 @@ private:
         float cursorY = frame_.y + padding_.top + mainOffset(innerHeight(), contentHeight);
 
         for (const auto& child : children_) {
+            if (child->ignoreLayout_) {
+                continue;
+            }
             const float childOuterWidth = outerWidth(*child);
             const float childX = frame_.x + padding_.left + crossOffset(innerWidth(), childOuterWidth) + child->margin_.left;
             const float childY = cursorY + child->margin_.top;
@@ -487,16 +605,21 @@ private:
             child->layout(childX, childY);
             cursorY += outerHeight(*child) + spacing_;
         }
+        layoutOverlayChildren();
     }
 
     void layoutStack() {
         for (const auto& child : children_) {
+            if (child->ignoreLayout_) {
+                continue;
+            }
             const float childOuterWidth = outerWidth(*child);
             const float childOuterHeight = outerHeight(*child);
             const float childX = frame_.x + padding_.left + (child->hasX_ ? child->x_ : crossOffset(innerWidth(), childOuterWidth)) + child->margin_.left;
             const float childY = frame_.y + padding_.top + (child->hasY_ ? child->y_ : mainOffset(innerHeight(), childOuterHeight)) + child->margin_.top;
             child->layout(childX, childY);
         }
+        layoutOverlayChildren();
     }
 
     void layoutFlow() {
@@ -509,6 +632,9 @@ private:
         float cursorY = startY;
 
         for (const auto& child : children_) {
+            if (child->ignoreLayout_) {
+                continue;
+            }
             const float childOuterWidth = outerWidth(*child);
             const float childOuterHeight = outerHeight(*child);
             const bool wrap = cursorX > startX && availableWidth > 0.0f && lineWidth + spacing_ + childOuterWidth > availableWidth;
@@ -529,6 +655,7 @@ private:
             lineWidth += childOuterWidth;
             lineHeight = std::max(lineHeight, childOuterHeight);
         }
+        layoutOverlayChildren();
     }
 
     std::vector<std::reference_wrapper<Node>> derefChildren() {
@@ -559,6 +686,7 @@ private:
     float maxHeight_ = std::numeric_limits<float>::max();
     float flexGrow_ = 0.0f;
     float flexShrink_ = 0.0f;
+    bool ignoreLayout_ = false;
     float measuredWidth_ = 0.0f;
     float measuredHeight_ = 0.0f;
     LayoutRect frame_;

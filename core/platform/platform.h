@@ -36,6 +36,7 @@ struct FileDialogResult {
     }
 };
 
+bool repairCurrentWorkingDirectory();
 bool openUrl(const std::string& url);
 FileDialogResult openFileDialog(const FileDialogOptions& options = {});
 std::string chooseFile(const FileDialogOptions& options = {});
@@ -47,5 +48,9 @@ bool consumeTrayShowRequested();
 bool consumeTrayExitRequested();
 void shutdownTray();
 void setImeCursorRect(window::Handle window, float x, float y, float width, float height);
+void requestFrame();
+void requestUiUpdate();
+bool consumeUiUpdate();
+bool consumeFrameRequest();
 
 } // namespace core::platform

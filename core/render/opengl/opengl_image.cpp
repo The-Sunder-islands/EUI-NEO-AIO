@@ -11,18 +11,146 @@ namespace core::render::opengl {
 
 namespace {
 
+struct TextureResourceHeader {
+    GLuint texture = 0;
+};
+
 struct ImageTextureResource {
     GLuint texture = 0;
     int width = 0;
     int height = 0;
 };
 
+struct LayerTextureResource {
+    GLuint texture = 0;
+    GLuint framebuffer = 0;
+    int width = 0;
+    int height = 0;
+};
+
 GLuint textureIdFromHandle(RenderBackend::TextureHandle handle) {
-    auto* resource = static_cast<ImageTextureResource*>(handle);
+    auto* resource = static_cast<TextureResourceHeader*>(handle);
     return resource != nullptr ? resource->texture : 0;
 }
 
 } // namespace
+
+OpenGLRenderBackend::LayerHandle OpenGLRenderBackend::createLayer(int width, int height) {
+    if (width <= 0 || height <= 0) {
+        return nullptr;
+    }
+    auto* resource = new LayerTextureResource();
+    if (!resizeLayer(resource, width, height)) {
+        delete resource;
+        return nullptr;
+    }
+    return resource;
+}
+
+bool OpenGLRenderBackend::resizeLayer(LayerHandle handle, int width, int height) {
+    auto* resource = static_cast<LayerTextureResource*>(handle);
+    if (resource == nullptr || width <= 0 || height <= 0) {
+        return false;
+    }
+    if (resource->texture != 0 && resource->framebuffer != 0 &&
+        resource->width == width && resource->height == height) {
+        return true;
+    }
+    if (resource->texture != 0) {
+        glDeleteTextures(1, &resource->texture);
+        resource->texture = 0;
+    }
+    if (resource->framebuffer != 0) {
+        glDeleteFramebuffers(1, &resource->framebuffer);
+        resource->framebuffer = 0;
+    }
+
+    glGenTextures(1, &resource->texture);
+    if (resource->texture == 0) {
+        resetStateCache();
+        return false;
+    }
+    glBindTexture(GL_TEXTURE_2D, resource->texture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+
+    glGenFramebuffers(1, &resource->framebuffer);
+    glBindFramebuffer(GL_FRAMEBUFFER, resource->framebuffer);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, resource->texture, 0);
+    const bool complete = glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    resetStateCache();
+
+    if (!complete) {
+        if (resource->texture != 0) {
+            glDeleteTextures(1, &resource->texture);
+            resource->texture = 0;
+        }
+        if (resource->framebuffer != 0) {
+            glDeleteFramebuffers(1, &resource->framebuffer);
+            resource->framebuffer = 0;
+        }
+        resetStateCache();
+        return false;
+    }
+    resource->width = width;
+    resource->height = height;
+    return true;
+}
+
+void OpenGLRenderBackend::destroyLayer(LayerHandle handle) {
+    auto* resource = static_cast<LayerTextureResource*>(handle);
+    if (resource == nullptr) {
+        return;
+    }
+    if (resource->texture != 0) {
+        glDeleteTextures(1, &resource->texture);
+        resource->texture = 0;
+    }
+    if (resource->framebuffer != 0) {
+        glDeleteFramebuffers(1, &resource->framebuffer);
+        resource->framebuffer = 0;
+    }
+    delete resource;
+    resetStateCache();
+}
+
+bool OpenGLRenderBackend::beginLayerFrame(LayerHandle handle, int width, int height) {
+    auto* resource = static_cast<LayerTextureResource*>(handle);
+    if (resource == nullptr || !resizeLayer(resource, width, height)) {
+        return false;
+    }
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &layerPreviousFramebuffer_);
+    glGetIntegerv(GL_VIEWPORT, layerPreviousViewport_);
+    layerFrameActive_ = true;
+    glBindFramebuffer(GL_FRAMEBUFFER, resource->framebuffer);
+    glViewport(0, 0, width, height);
+    resetStateCache();
+    return true;
+}
+
+void OpenGLRenderBackend::endLayerFrame() {
+    if (layerFrameActive_) {
+        glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(std::max(0, layerPreviousFramebuffer_)));
+        glViewport(layerPreviousViewport_[0],
+                   layerPreviousViewport_[1],
+                   layerPreviousViewport_[2],
+                   layerPreviousViewport_[3]);
+        layerFrameActive_ = false;
+    } else {
+        glBindFramebuffer(GL_FRAMEBUFFER, cacheFramebuffer_ != 0 ? cacheFramebuffer_ : 0);
+        glViewport(0, 0, framebufferWidth_, framebufferHeight_);
+    }
+    resetStateCache();
+}
+
+OpenGLRenderBackend::TextureHandle OpenGLRenderBackend::layerTexture(LayerHandle handle) {
+    return handle;
+}
 
 OpenGLRenderBackend::TextureHandle OpenGLRenderBackend::createTexture(const unsigned char* pixels,
                                                                       int width,
@@ -110,6 +238,39 @@ void OpenGLRenderBackend::drawTexture(TextureHandle handle,
     glUniform4f(imageTintLocation_, tint.r, tint.g, tint.b, tint.a);
     glUniform4f(imageRectLocation_, rect.x, rect.y, rect.width, rect.height);
     glUniform1f(imageRadiusLocation_, radius);
+    glUniform1i(imageTextureLocation_, 0);
+
+    bindVertexArray(imageVao_);
+    bindArrayBuffer(imageVbo_);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, static_cast<GLsizeiptr>(vertexFloatCount * sizeof(float)), vertices);
+    activeTextureUnit(0);
+    bindTexture2D(texture);
+    glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertexFloatCount / 7));
+}
+
+void OpenGLRenderBackend::drawLayerTexture(TextureHandle handle,
+                                           const float* vertices,
+                                           std::size_t vertexFloatCount,
+                                           const core::Rect& rect,
+                                           int windowWidth,
+                                           int windowHeight) {
+    const GLuint texture = textureIdFromHandle(handle);
+    if (texture == 0 || vertices == nullptr || vertexFloatCount < 42 ||
+        windowWidth <= 0 || windowHeight <= 0) {
+        return;
+    }
+    if (!ensureImageResources()) {
+        return;
+    }
+
+    setPremultipliedAlphaBlend();
+
+    useProgram(imageShaderProgram_);
+    glUniform2f(imageWindowSizeLocation_, static_cast<float>(std::max(1, windowWidth)),
+                static_cast<float>(std::max(1, windowHeight)));
+    glUniform4f(imageTintLocation_, 1.0f, 1.0f, 1.0f, 1.0f);
+    glUniform4f(imageRectLocation_, rect.x, rect.y, rect.width, rect.height);
+    glUniform1f(imageRadiusLocation_, 0.0f);
     glUniform1i(imageTextureLocation_, 0);
 
     bindVertexArray(imageVao_);

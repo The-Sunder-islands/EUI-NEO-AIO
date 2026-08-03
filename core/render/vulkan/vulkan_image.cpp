@@ -1,6 +1,7 @@
 #include "core/render/vulkan/vulkan_backend.h"
 #include "core/render/vulkan/vulkan_image_shaders.h"
 
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <limits>
@@ -44,68 +45,15 @@ bool VulkanRenderBackend::updateTexture(TextureHandle handle, const unsigned cha
     if (texture->image == VK_NULL_HANDLE || texture->width != width || texture->height != height || texture->channels != 4) {
         destroyTextureResource(*texture);
 
-        VkImageCreateInfo imageInfo{};
-        imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-        imageInfo.imageType = VK_IMAGE_TYPE_2D;
-        imageInfo.extent = {static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(height), 1};
-        imageInfo.mipLevels = 1;
-        imageInfo.arrayLayers = 1;
-        imageInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
-        imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-        imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-        imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-        imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        if (vkCreateImage(device_, &imageInfo, nullptr, &texture->image) != VK_SUCCESS) {
+        if (!createTargetImage(*texture,
+                               width,
+                               height,
+                               VK_FORMAT_R8G8B8A8_UNORM,
+                               VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT) ||
+            !ensureTextureSampler(*texture)) {
             destroyTextureResource(*texture);
             return false;
         }
-
-        VkMemoryRequirements memoryRequirements{};
-        vkGetImageMemoryRequirements(device_, texture->image, &memoryRequirements);
-        VkMemoryAllocateInfo allocInfo{};
-        allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-        allocInfo.allocationSize = memoryRequirements.size;
-        allocInfo.memoryTypeIndex = findMemoryType(memoryRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-        if (allocInfo.memoryTypeIndex == std::numeric_limits<std::uint32_t>::max() ||
-            vkAllocateMemory(device_, &allocInfo, nullptr, &texture->memory) != VK_SUCCESS ||
-            vkBindImageMemory(device_, texture->image, texture->memory, 0) != VK_SUCCESS) {
-            destroyTextureResource(*texture);
-            return false;
-        }
-
-        VkImageViewCreateInfo viewInfo{};
-        viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        viewInfo.image = texture->image;
-        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        viewInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
-        viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        viewInfo.subresourceRange.levelCount = 1;
-        viewInfo.subresourceRange.layerCount = 1;
-        if (vkCreateImageView(device_, &viewInfo, nullptr, &texture->view) != VK_SUCCESS) {
-            destroyTextureResource(*texture);
-            return false;
-        }
-
-        VkSamplerCreateInfo samplerInfo{};
-        samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-        samplerInfo.magFilter = VK_FILTER_LINEAR;
-        samplerInfo.minFilter = VK_FILTER_LINEAR;
-        samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-        samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-        samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-        samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-        samplerInfo.maxLod = 1.0f;
-        if (vkCreateSampler(device_, &samplerInfo, nullptr, &texture->sampler) != VK_SUCCESS) {
-            destroyTextureResource(*texture);
-            return false;
-        }
-
-        texture->width = width;
-        texture->height = height;
-        texture->channels = 4;
-        texture->layout = VK_IMAGE_LAYOUT_UNDEFINED;
-        texture->descriptorSet = VK_NULL_HANDLE;
     }
 
     const VkDeviceSize uploadSize = static_cast<VkDeviceSize>(width) * static_cast<VkDeviceSize>(height) * 4u;
@@ -162,7 +110,7 @@ void VulkanRenderBackend::drawTexture(TextureHandle handle,
         vertexFloatCount < 42 || tint.a <= 0.001f || windowWidth <= 0 || windowHeight <= 0) {
         return;
     }
-    if (!ensureImagePipeline()) {
+    if (!ensureImagePipeline(false)) {
         return;
     }
     if (!frameRecorded_) {
@@ -218,8 +166,171 @@ void VulkanRenderBackend::drawTexture(TextureHandle handle,
     vkCmdDraw(commandBuffer, static_cast<std::uint32_t>(vertexFloatCount / 7), 1, 0, 0);
 }
 
-bool VulkanRenderBackend::ensureImagePipeline() {
-    if (imagePipeline_ != VK_NULL_HANDLE) {
+VulkanRenderBackend::LayerHandle VulkanRenderBackend::createLayer(int width, int height) {
+    if (width <= 0 || height <= 0) {
+        return nullptr;
+    }
+    auto* layer = new LayerResource();
+    if (!ensureLayerResource(*layer, width, height)) {
+        delete layer;
+        return nullptr;
+    }
+    layers_.push_back(layer);
+    return layer;
+}
+
+bool VulkanRenderBackend::resizeLayer(LayerHandle handle, int width, int height) {
+    auto* layer = static_cast<LayerResource*>(handle);
+    return layer != nullptr && ensureLayerResource(*layer, width, height);
+}
+
+void VulkanRenderBackend::destroyLayer(LayerHandle handle) {
+    auto* layer = static_cast<LayerResource*>(handle);
+    if (layer == nullptr) {
+        return;
+    }
+    if (device_ != VK_NULL_HANDLE && frameActive_) {
+        endActiveRenderPass();
+    } else if (device_ != VK_NULL_HANDLE) {
+        vkDeviceWaitIdle(device_);
+    }
+    if (activeLayer_ == layer) {
+        activeLayer_ = nullptr;
+        renderTarget_ = RenderTarget::Swapchain;
+        renderingToCache_ = false;
+    }
+    layers_.erase(std::remove(layers_.begin(), layers_.end(), layer), layers_.end());
+    destroyLayerResource(*layer);
+    delete layer;
+}
+
+bool VulkanRenderBackend::beginLayerFrame(LayerHandle handle, int width, int height) {
+    auto* layer = static_cast<LayerResource*>(handle);
+    if (!frameActive_ || layer == nullptr || !ensureLayerResource(*layer, width, height)) {
+        return false;
+    }
+
+    endActiveRenderPass();
+    previousLayerTarget_ = renderTarget_;
+    renderTarget_ = RenderTarget::Layer;
+    renderingToCache_ = false;
+    activeLayer_ = layer;
+    primitiveVertices_.used = 0;
+    textVertices_.used = 0;
+    imageVertices_.used = 0;
+    return true;
+}
+
+void VulkanRenderBackend::endLayerFrame() {
+    if (renderTarget_ != RenderTarget::Layer || activeLayer_ == nullptr) {
+        return;
+    }
+    endActiveRenderPass();
+    transitionLayerImage(*activeLayer_, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    activeLayer_ = nullptr;
+    renderTarget_ = previousLayerTarget_;
+    renderingToCache_ = renderTarget_ == RenderTarget::RenderCache;
+    previousLayerTarget_ = RenderTarget::Swapchain;
+}
+
+VulkanRenderBackend::TextureHandle VulkanRenderBackend::layerTexture(LayerHandle handle) {
+    auto* layer = static_cast<LayerResource*>(handle);
+    if (layer == nullptr || layer->texture.view == VK_NULL_HANDLE) {
+        return nullptr;
+    }
+    return &layer->texture;
+}
+
+void VulkanRenderBackend::drawLayerTexture(TextureHandle handle,
+                                           const float* vertices,
+                                           std::size_t vertexFloatCount,
+                                           const core::Rect& rect,
+                                           int windowWidth,
+                                           int windowHeight) {
+    auto* texture = static_cast<TextureResource*>(handle);
+    if (!frameActive_ || texture == nullptr || texture->view == VK_NULL_HANDLE || vertices == nullptr ||
+        vertexFloatCount < 42 || windowWidth <= 0 || windowHeight <= 0) {
+        return;
+    }
+    if (texture->layout != VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+        endActiveRenderPass();
+        transitionImageLayout(currentCommandBuffer(),
+                              texture->image,
+                              texture->layout,
+                              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        texture->layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    }
+    if (!ensureImagePipeline(true)) {
+        return;
+    }
+    if (!frameRecorded_) {
+        recordClearPass(clearColor_);
+    }
+    if (!renderPassActive_) {
+        beginLoadPass();
+    }
+    if (!renderPassActive_ || !ensureImageDescriptor(*texture) || !ensureImageVertexBuffer()) {
+        return;
+    }
+
+    if (imageVertices_.used + vertexFloatCount > imageVertices_.capacity) {
+        return;
+    }
+    const std::size_t floatOffset = imageVertices_.used;
+    auto* mappedImageVertices = static_cast<float*>(imageVertices_.mapped);
+    std::array<float, 42> layerVertices{};
+    if (vertexFloatCount > layerVertices.size()) {
+        return;
+    }
+    std::memcpy(layerVertices.data(), vertices, vertexFloatCount * sizeof(float));
+    // Retained layers are color attachments; their V origin differs from uploaded image textures.
+    for (std::size_t offset = 6; offset < vertexFloatCount; offset += 7) {
+        layerVertices[offset] = 1.0f - layerVertices[offset];
+    }
+    std::memcpy(mappedImageVertices + floatOffset, layerVertices.data(), vertexFloatCount * sizeof(float));
+    imageVertices_.used += vertexFloatCount;
+
+    VkCommandBuffer commandBuffer = currentCommandBuffer();
+    if (!applyDrawViewportAndScissor(windowWidth, windowHeight)) {
+        return;
+    }
+
+    ImagePushConstants constants{};
+    constants.windowSize[0] = static_cast<float>(windowWidth);
+    constants.windowSize[1] = static_cast<float>(windowHeight);
+    constants.tint[0] = 1.0f;
+    constants.tint[1] = 1.0f;
+    constants.tint[2] = 1.0f;
+    constants.tint[3] = 1.0f;
+    constants.rect[0] = rect.x;
+    constants.rect[1] = rect.y;
+    constants.rect[2] = rect.width;
+    constants.rect[3] = rect.height;
+    constants.flags[0] = 0.0f;
+
+    const VkDeviceSize offset = static_cast<VkDeviceSize>(floatOffset * sizeof(float));
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, imagePremultipliedPipeline_);
+    vkCmdBindDescriptorSets(commandBuffer,
+                            VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            imagePipelineLayout_,
+                            0,
+                            1,
+                            &texture->descriptorSet,
+                            0,
+                            nullptr);
+    vkCmdBindVertexBuffers(commandBuffer, 0, 1, &imageVertices_.buffer, &offset);
+    vkCmdPushConstants(commandBuffer,
+                       imagePipelineLayout_,
+                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                       0,
+                       sizeof(constants),
+                       &constants);
+    vkCmdDraw(commandBuffer, static_cast<std::uint32_t>(vertexFloatCount / 7), 1, 0, 0);
+}
+
+bool VulkanRenderBackend::ensureImagePipeline(bool premultipliedAlpha) {
+    VkPipeline& targetPipeline = premultipliedAlpha ? imagePremultipliedPipeline_ : imagePipeline_;
+    if (targetPipeline != VK_NULL_HANDLE) {
         return true;
     }
     if (device_ == VK_NULL_HANDLE || renderPass_ == VK_NULL_HANDLE) {
@@ -311,7 +422,7 @@ bool VulkanRenderBackend::ensureImagePipeline() {
 
     VkPipelineColorBlendAttachmentState colorBlendAttachment{};
     colorBlendAttachment.blendEnable = VK_TRUE;
-    colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+    colorBlendAttachment.srcColorBlendFactor = premultipliedAlpha ? VK_BLEND_FACTOR_ONE : VK_BLEND_FACTOR_SRC_ALPHA;
     colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
     colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
     colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
@@ -338,16 +449,18 @@ bool VulkanRenderBackend::ensureImagePipeline() {
     pushConstant.offset = 0;
     pushConstant.size = sizeof(ImagePushConstants);
 
-    VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
-    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipelineLayoutInfo.setLayoutCount = 1;
-    pipelineLayoutInfo.pSetLayouts = &imageDescriptorSetLayout_;
-    pipelineLayoutInfo.pushConstantRangeCount = 1;
-    pipelineLayoutInfo.pPushConstantRanges = &pushConstant;
-    if (vkCreatePipelineLayout(device_, &pipelineLayoutInfo, nullptr, &imagePipelineLayout_) != VK_SUCCESS) {
-        vkDestroyShaderModule(device_, fragmentShader, nullptr);
-        vkDestroyShaderModule(device_, vertexShader, nullptr);
-        return false;
+    if (imagePipelineLayout_ == VK_NULL_HANDLE) {
+        VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+        pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        pipelineLayoutInfo.setLayoutCount = 1;
+        pipelineLayoutInfo.pSetLayouts = &imageDescriptorSetLayout_;
+        pipelineLayoutInfo.pushConstantRangeCount = 1;
+        pipelineLayoutInfo.pPushConstantRanges = &pushConstant;
+        if (vkCreatePipelineLayout(device_, &pipelineLayoutInfo, nullptr, &imagePipelineLayout_) != VK_SUCCESS) {
+            vkDestroyShaderModule(device_, fragmentShader, nullptr);
+            vkDestroyShaderModule(device_, vertexShader, nullptr);
+            return false;
+        }
     }
 
     VkGraphicsPipelineCreateInfo pipelineInfo{};
@@ -365,11 +478,18 @@ bool VulkanRenderBackend::ensureImagePipeline() {
     pipelineInfo.renderPass = renderPass_;
     pipelineInfo.subpass = 0;
 
-    const bool created = vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &imagePipeline_) == VK_SUCCESS;
+    const bool created = vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &targetPipeline) == VK_SUCCESS;
     vkDestroyShaderModule(device_, fragmentShader, nullptr);
     vkDestroyShaderModule(device_, vertexShader, nullptr);
     if (!created) {
-        destroyImagePipeline();
+        if (premultipliedAlpha) {
+            if (imagePremultipliedPipeline_ != VK_NULL_HANDLE) {
+                vkDestroyPipeline(device_, imagePremultipliedPipeline_, nullptr);
+                imagePremultipliedPipeline_ = VK_NULL_HANDLE;
+            }
+        } else {
+            destroyImagePipeline();
+        }
     }
     return created;
 }
@@ -467,6 +587,10 @@ void VulkanRenderBackend::destroyImagePipeline() {
     if (imagePipeline_ != VK_NULL_HANDLE) {
         vkDestroyPipeline(device_, imagePipeline_, nullptr);
         imagePipeline_ = VK_NULL_HANDLE;
+    }
+    if (imagePremultipliedPipeline_ != VK_NULL_HANDLE) {
+        vkDestroyPipeline(device_, imagePremultipliedPipeline_, nullptr);
+        imagePremultipliedPipeline_ = VK_NULL_HANDLE;
     }
     if (imagePipelineLayout_ != VK_NULL_HANDLE) {
         vkDestroyPipelineLayout(device_, imagePipelineLayout_, nullptr);

@@ -41,7 +41,7 @@ EUI-NEO 是一个基于 C++17 的跨平台高性能轻量级 UI 框架，支持 
 - Vulkan SDK 可选。只有需要 Vulkan 渲染器时才使用 `build-vk` 构建目录。
 - 平台 OpenGL/windowing 开发文件。Linux 构建还需要 X11 和 libcurl 开发包。
 
-GLFW、glad、tray、FreeType、HarfBuzz、libpng、zlib 等构建期第三方源码已内置在 `3rd/` 下。默认依赖模式是 `auto`：本地 `3rd/` 源码存在时直接使用，缺失时才从固定上游地址联网拉取。需要严格离线构建时，可配置 `-DEUI_DEPS_MODE=bundled`；需要强制联网拉取时，可配置 `-DEUI_DEPS_MODE=fetch`。HarfBuzz shaping 默认启用，可通过 `-DEUI_ENABLE_HARFBUZZ=OFF` 关闭。
+GLFW、glad、tray、FreeType、HarfBuzz、libpng、zlib 等构建期第三方源码已内置在 `3rd/` 下。默认依赖模式是 `auto`：先复用父项目已有的 `glfw` / `glad` target，再尝试包管理器 target，最后才使用本地 `3rd/` 源码或固定上游兜底拉取。需要严格离线构建时，可配置 `-DEUI_DEPS_MODE=bundled`；需要强制联网拉取时，可配置 `-DEUI_DEPS_MODE=fetch`。HarfBuzz shaping 默认启用，可通过 `-DEUI_ENABLE_HARFBUZZ=OFF` 关闭。
 
 内置和 fetch 下载的依赖默认按静态链接构建，包括 GLFW。Release 包因此不需要额外携带 GLFW DLL / dylib / so。只有选择系统 SDL2 包时，SDL2 仍可能是动态库。
 
@@ -87,9 +87,11 @@ sudo apt-get install -y ninja-build libx11-dev libxrandr-dev libxinerama-dev lib
 sudo apt-get install -y libsdl2-dev
 ```
 
-顶层构建会为 `examples/*.cpp` 下的每个页面源文件生成一个可执行程序，例如 `gallery` 和 `eui_demo`。构建后会自动把 `assets/` 复制到可执行文件目录。
+顶层构建会为 `examples/*.cpp` 下的每个页面源文件生成一个可执行程序，例如 `gallery`、`chat` 和 `eui_demo`。构建后会自动把 `assets/` 复制到可执行文件目录。
 
-推送 `v*` tag 后，GitHub Actions 会构建 Windows、Linux、macOS 包，并且 release assets 只上传运行包。
+用户应用可以放在 `apps/` 下，顶层构建默认会像 examples 一样生成可执行文件。支持两种写法：单文件 `apps/my_app.cpp`，或目录式 `apps/my_app/app.cpp`。目录式应用可以带自己的 `apps/my_app/assets/`，构建后会在框架资源复制完成后继续复制到可执行文件旁边的 `assets/` 目录。需要关闭自动扫描时传入 `-DEUI_BUILD_USER_APPS=OFF`。
+
+推送 `v*` tag 后，GitHub Actions 会构建 Windows、Linux、macOS 包，并且 release assets 会上传运行包和 SDK 包。运行包会自动收集所有由 `examples/*.cpp` 生成的可执行文件。
 
 ## 接入到你的项目
 
@@ -162,6 +164,7 @@ components/   基于 DSL 封装的通用组件
 core/         DSL、Runtime、图元、文本、图片、网络和平台能力
 docs/         项目实现文档
 examples/     独立 gallery 和示例应用源码
+apps/         用户应用源码；支持单文件 .cpp 或目录式 app.cpp
 include/      公共 include 路径：eui_neo.h 和 eui/* facade 头文件
 tests/        probe 源码、fixture 应用和本地 benchmark 记录
 3rd/          内置第三方构建源码和单文件依赖
@@ -171,11 +174,13 @@ tests/        probe 源码、fixture 应用和本地 benchmark 记录
 
 - [DSL 设计与当前实现](docs/DSL.md)
 - [组件](docs/组件.md)
+- [状态模型](docs/状态.md)
 - [布局](docs/布局.md)
 - [事件](docs/事件.md)
 - [动画](docs/动画.md)
 - [异步](docs/异步.md)
 - [渲染后端架构与流程](docs/渲染后端架构.md)
+- [Retained Layer Cache](docs/retained_layer_cache.md)
 - [图片](docs/图片.md)
 - [网络](docs/网络.md)
 - [平台能力](docs/平台能力.md)

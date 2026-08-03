@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.14)
-project(EUI-NEO VERSION 0.4.1)
+project(EUI-NEO VERSION 0.5.1)
+
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
 
 # -----------------------------------------------------------------------------
 # Options
@@ -11,11 +14,14 @@ else()
     set(EUI_NEO_TOP_LEVEL_DEFAULT OFF)
 endif()
 option(EUI_BUILD_APPS "Build EUI-NEO bundled example applications" ${EUI_NEO_TOP_LEVEL_DEFAULT})
+option(EUI_BUILD_USER_APPS "Build user applications from apps/." ${EUI_NEO_TOP_LEVEL_DEFAULT})
 option(EUI_BUILD_TEST_FIXTURES "Build internal test fixture applications." OFF)
+option(EUI_BUILD_SHARED "Build eui_neo as a shared library instead of a static library." OFF)
+option(EUI_ENABLE_INSTALL "Install EUI-NEO library, headers, and CMake package files." ${EUI_NEO_TOP_LEVEL_DEFAULT})
 option(EUI_VULKAN_LOW_LATENCY_PRESENT "Prefer low-latency Vulkan presentation when available." OFF)
 
 set(EUI_DEFAULT_WINDOW_BACKEND "glfw")
-set(EUI_DEFAULT_RENDER_BACKEND "vulkan")
+set(EUI_DEFAULT_RENDER_BACKEND "opengl")
 get_filename_component(EUI_BUILD_DIR_NAME "${CMAKE_BINARY_DIR}" NAME)
 string(TOLOWER "${EUI_BUILD_DIR_NAME}" EUI_BUILD_DIR_NAME_LOWER)
 if(EUI_BUILD_DIR_NAME_LOWER MATCHES "(^|[-_])sdl2($|[-_])")
@@ -50,22 +56,45 @@ endif()
 
 function(eui_apply_compile_options target_name)
     if(MSVC)
-        target_compile_options(${target_name} PRIVATE $<$<NOT:$<CONFIG:Debug>>:/O1> /GS- /sdl- /utf-8 /wd4819)
+        target_compile_options(${target_name} PRIVATE
+            /utf-8
+            $<$<NOT:$<CONFIG:Debug>>:/O1>
+            $<$<NOT:$<CONFIG:Debug>>:/GS->
+            $<$<NOT:$<CONFIG:Debug>>:/sdl->
+            $<$<NOT:$<CONFIG:Debug>>:/wd4819>
+        )
     elseif(APPLE)
-        target_compile_options(${target_name} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Os -fno-exceptions -fno-rtti>)
+        target_compile_options(${target_name} PRIVATE
+            $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<NOT:$<CONFIG:Debug>>>:-Os>
+            $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<NOT:$<CONFIG:Debug>>>:-fno-exceptions>
+            $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<NOT:$<CONFIG:Debug>>>:-fno-rtti>
+        )
     else()
-        target_compile_options(${target_name} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Os -fno-exceptions -fno-rtti>)
+        target_compile_options(${target_name} PRIVATE
+            $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<NOT:$<CONFIG:Debug>>>:-Os>
+            $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<NOT:$<CONFIG:Debug>>>:-fno-exceptions>
+            $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<NOT:$<CONFIG:Debug>>>:-fno-rtti>
+        )
     endif()
 endfunction()
 
 function(eui_apply_app_link_options target_name)
     if(MSVC)
         set_target_properties(${target_name} PROPERTIES VS_GLOBAL_VcpkgXUseBuiltInApplocalDeps true)
-        target_link_options(${target_name} PRIVATE /OPT:REF /OPT:ICF /ENTRY:mainCRTStartup /SUBSYSTEM:WINDOWS)
+        target_link_options(${target_name} PRIVATE
+            $<$<NOT:$<CONFIG:Debug>>:/OPT:REF>
+            $<$<NOT:$<CONFIG:Debug>>:/OPT:ICF>
+            $<$<NOT:$<CONFIG:Debug>>:/INCREMENTAL:NO>
+            /ENTRY:mainCRTStartup
+            /SUBSYSTEM:WINDOWS
+        )
     elseif(APPLE)
-        target_link_options(${target_name} PRIVATE -Wl,-dead_strip)
+        target_link_options(${target_name} PRIVATE $<$<NOT:$<CONFIG:Debug>>:-Wl,-dead_strip>)
     else()
-        target_link_options(${target_name} PRIVATE -Wl,--gc-sections -s)
+        target_link_options(${target_name} PRIVATE
+            $<$<NOT:$<CONFIG:Debug>>:-Wl,--gc-sections>
+            $<$<NOT:$<CONFIG:Debug>>:-s>
+        )
     endif()
 endfunction()
 
@@ -76,7 +105,9 @@ endfunction()
 set(EUI_VULKAN_BACKEND_SOURCES
     core/render/vulkan/vulkan_backend.cpp
     core/render/vulkan/vulkan_cache.cpp
+    core/render/vulkan/vulkan_canvas.cpp
     core/render/vulkan/vulkan_primitives.cpp
+    core/render/vulkan/vulkan_polygon.cpp
     core/render/vulkan/vulkan_text.cpp
     core/render/vulkan/vulkan_image.cpp
 )
@@ -99,7 +130,15 @@ elseif(EUI_RENDER_BACKEND STREQUAL "vulkan")
 endif()
 message(STATUS "EUI render backend: requested=${EUI_RENDER_BACKEND}, resolved=${EUI_RESOLVED_RENDER_BACKEND}")
 
+set(EUI_NEO_LIBRARY_TYPE STATIC)
+if(EUI_BUILD_SHARED)
+    set(EUI_NEO_LIBRARY_TYPE SHARED)
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+endif()
+
 include("${CMAKE_CURRENT_SOURCE_DIR}/3rd/dependencies.cmake")
+
+find_package(Python3 COMPONENTS Interpreter QUIET)
 
 # -----------------------------------------------------------------------------
 # Core library sources
@@ -111,12 +150,12 @@ set(CORE_SOURCES
     core/platform/native_bridge.c
     core/platform/performance_stats.cpp
     core/platform/platform.cpp
+    core/render/canvas.cpp
     core/render/image.cpp
     core/render/image_facade.cpp
     core/render/image_source.cpp
     core/render/primitive.cpp
     core/render/render_backend.cpp
-    core/render/canvas.cpp
     core/render/stb_image_impl.cpp
     core/render/text.cpp
     core/platform/tray_bridge.c
@@ -142,10 +181,22 @@ endif()
 # Core library target
 # -----------------------------------------------------------------------------
 
-add_library(eui_neo STATIC ${CORE_SOURCES})
+add_library(eui_neo ${EUI_NEO_LIBRARY_TYPE} ${CORE_SOURCES})
 add_library(eui::neo ALIAS eui_neo)
-target_include_directories(eui_neo PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR} ${TRAY_INCLUDE_DIR})
+set_target_properties(eui_neo PROPERTIES EXPORT_NAME neo)
+if(EUI_BUILD_SHARED AND WIN32)
+    set_target_properties(eui_neo PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+endif()
+target_include_directories(eui_neo
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+        $<BUILD_INTERFACE:${TRAY_INCLUDE_DIR}>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/eui-neo>
+)
 target_link_libraries(eui_neo PUBLIC Threads::Threads)
+target_compile_features(eui_neo PUBLIC cxx_std_17)
 eui_apply_compile_options(eui_neo)
 
 if(EUI_RESOLVED_RENDER_BACKEND STREQUAL "opengl")
@@ -238,6 +289,15 @@ function(eui_neo_copy_assets target_name)
     endif()
 endfunction()
 
+function(eui_neo_copy_app_assets target_name asset_dir)
+    if(EXISTS "${asset_dir}")
+        add_custom_command(TARGET ${target_name} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:${target_name}>/assets
+            COMMAND ${CMAKE_COMMAND} -E copy_directory "${asset_dir}" $<TARGET_FILE_DIR:${target_name}>/assets
+        )
+    endif()
+endfunction()
+
 function(eui_neo_configure_app target_name)
     target_link_libraries(${target_name} PRIVATE eui::neo)
     eui_apply_compile_options(${target_name})
@@ -255,6 +315,34 @@ if(EUI_BUILD_APPS)
         get_filename_component(app_name "${app_source}" NAME_WE)
         add_executable(${app_name} ${EUI_APP_MAIN_SOURCE} "${app_source}" ${APP_ICON_RESOURCE})
         eui_neo_configure_app(${app_name})
+        if(app_name STREQUAL "chat" AND WIN32)
+            target_link_libraries(${app_name} PRIVATE ws2_32)
+        endif()
+    endforeach()
+endif()
+
+if(EUI_BUILD_USER_APPS)
+    file(GLOB USER_APP_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/apps/*.cpp")
+    foreach(app_source ${USER_APP_SOURCES})
+        get_filename_component(app_name "${app_source}" NAME_WE)
+        if(TARGET ${app_name})
+            message(FATAL_ERROR "Duplicate EUI app target name '${app_name}'. Rename one app source or folder.")
+        endif()
+        add_executable(${app_name} ${EUI_APP_MAIN_SOURCE} "${app_source}" ${APP_ICON_RESOURCE})
+        eui_neo_configure_app(${app_name})
+    endforeach()
+
+    file(GLOB USER_APP_ENTRY_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/apps/*/app.cpp")
+    foreach(app_source ${USER_APP_ENTRY_SOURCES})
+        get_filename_component(app_dir "${app_source}" DIRECTORY)
+        get_filename_component(app_name "${app_dir}" NAME)
+        if(TARGET ${app_name})
+            message(FATAL_ERROR "Duplicate EUI app target name '${app_name}'. Rename one app source or folder.")
+        endif()
+        add_executable(${app_name} ${EUI_APP_MAIN_SOURCE} "${app_source}" ${APP_ICON_RESOURCE})
+        target_include_directories(${app_name} PRIVATE "${app_dir}")
+        eui_neo_configure_app(${app_name})
+        eui_neo_copy_app_assets(${app_name} "${app_dir}/assets")
     endforeach()
 endif()
 
@@ -276,4 +364,179 @@ if(EUI_BUILD_TEST_FIXTURES)
         add_test(NAME ${probe_name} COMMAND ${probe_name} --frames 3)
         set_tests_properties(${probe_name} PROPERTIES LABELS "probe")
     endforeach()
+
+    file(GLOB TEST_UNIT_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit/*.cpp")
+    foreach(unit_source ${TEST_UNIT_SOURCES})
+        get_filename_component(unit_name "${unit_source}" NAME_WE)
+        add_executable(${unit_name} "${unit_source}")
+        target_link_libraries(${unit_name} PRIVATE eui::neo)
+        eui_apply_compile_options(${unit_name})
+        add_test(NAME ${unit_name} COMMAND ${unit_name})
+        set_tests_properties(${unit_name} PROPERTIES LABELS "unit")
+    endforeach()
+endif()
+
+if(Python3_Interpreter_FOUND)
+    add_custom_target(eui_check_vulkan_shaders
+        COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/scripts/generate_vulkan_shaders.py" --check
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        COMMENT "Checking generated Vulkan shader headers"
+        VERBATIM
+    )
+endif()
+
+# -----------------------------------------------------------------------------
+# Install and CMake package export
+# -----------------------------------------------------------------------------
+
+if(EUI_ENABLE_INSTALL)
+    set(EUI_NEO_INSTALL_CMAKEDIR "${CMAKE_INSTALL_LIBDIR}/cmake/EuiNeo" CACHE STRING "Install path for EUI-NEO CMake package files")
+
+    install(TARGETS eui_neo
+        EXPORT EuiNeoTargets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    )
+    set(EUI_NEO_INSTALL_DEP_TARGETS freetype png_static eui_zlib harfbuzz eui_md4c SDL2-static)
+    if(EUI_OWNS_GLAD_TARGET)
+        list(APPEND EUI_NEO_INSTALL_DEP_TARGETS glad)
+    endif()
+    if(EUI_OWNS_GLFW_TARGET)
+        list(APPEND EUI_NEO_INSTALL_DEP_TARGETS glfw)
+    endif()
+    foreach(optional_target ${EUI_NEO_INSTALL_DEP_TARGETS})
+        if(TARGET ${optional_target})
+            install(TARGETS ${optional_target}
+                EXPORT EuiNeoTargets
+                ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+                LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+                RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+            )
+        endif()
+    endforeach()
+
+    install(DIRECTORY include/
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+        FILES_MATCHING PATTERN "*.h"
+    )
+    install(DIRECTORY components core
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/eui-neo
+        FILES_MATCHING PATTERN "*.h"
+    )
+    if(EUI_OWNS_GLFW_TARGET AND TARGET glfw)
+        install(DIRECTORY "${EUI_GLFW_DIR}/include/GLFW"
+            DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+            FILES_MATCHING PATTERN "*.h"
+        )
+    endif()
+    if(TARGET freetype)
+        install(DIRECTORY "${EUI_FREETYPE_DIR}/include/"
+            DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/freetype2
+            FILES_MATCHING PATTERN "*.h"
+        )
+    endif()
+    if(TARGET png_static)
+        install(FILES
+            "${EUI_LIBPNG_DIR}/png.h"
+            "${EUI_LIBPNG_DIR}/pngconf.h"
+            "${CMAKE_CURRENT_BINARY_DIR}/_deps/libpng-bundled-build/pnglibconf.h"
+            DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/libpng16
+        )
+    endif()
+    if(TARGET harfbuzz)
+        install(DIRECTORY "${EUI_HARFBUZZ_DIR}/src/"
+            DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/harfbuzz
+            FILES_MATCHING PATTERN "*.h" PATTERN "*.hh"
+        )
+    endif()
+    install(FILES
+        3rd/stb_image.h
+        3rd/nanosvg.h
+        3rd/nanosvgrast.h
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/eui-neo/3rd
+    )
+    install(FILES "${TRAY_INCLUDE_DIR}/tray.h"
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/eui-neo/3rd/tray
+    )
+    if(EUI_OWNS_GLAD_TARGET AND TARGET glad)
+        install(DIRECTORY "${glad_SOURCE_DIR}/include/"
+            DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/eui-neo/3rd/glad/include
+            FILES_MATCHING PATTERN "*.h"
+        )
+    endif()
+    install(FILES
+        "${EUI_ZLIB_DIR}/zconf.h"
+        "${EUI_ZLIB_DIR}/zlib.h"
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/eui-neo/3rd/zlib-1.3.1
+    )
+    if(TARGET eui_md4c)
+        install(FILES "${EUI_MD4C_DIR}/src/md4c.h"
+            DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/eui-neo/3rd/md4c/src
+        )
+    endif()
+
+    write_basic_package_version_file(
+        "${CMAKE_CURRENT_BINARY_DIR}/EuiNeoConfigVersion.cmake"
+        VERSION ${PROJECT_VERSION}
+        COMPATIBILITY SameMajorVersion
+    )
+    set(EUI_NEO_CONFIG_TEMPLATE "${CMAKE_CURRENT_BINARY_DIR}/EuiNeoConfig.cmake.in")
+    file(WRITE "${EUI_NEO_CONFIG_TEMPLATE}" [=[
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+set(EUI_NEO_WINDOW_BACKEND "@EUI_WINDOW_BACKEND@")
+set(EUI_NEO_RENDER_BACKEND "@EUI_RESOLVED_RENDER_BACKEND@")
+set(EUI_NEO_BUILD_SHARED @EUI_BUILD_SHARED@)
+set(EUI_NEO_DEPS_MODE "@EUI_DEPS_MODE@")
+set(EUI_NEO_ENABLE_HARFBUZZ @EUI_ENABLE_HARFBUZZ@)
+set(EUI_NEO_ENABLE_MARKDOWN @EUI_ENABLE_MARKDOWN@)
+
+find_dependency(Threads)
+
+if(EUI_NEO_RENDER_BACKEND STREQUAL "opengl")
+    find_dependency(OpenGL)
+    if(NOT @EUI_OWNS_GLAD_TARGET@)
+        find_dependency(glad CONFIG)
+    endif()
+elseif(EUI_NEO_RENDER_BACKEND STREQUAL "vulkan")
+    find_dependency(Vulkan)
+endif()
+
+if(EUI_NEO_WINDOW_BACKEND STREQUAL "glfw" AND NOT @EUI_OWNS_GLFW_TARGET@)
+    find_dependency(glfw3 CONFIG)
+endif()
+
+if(EUI_NEO_WINDOW_BACKEND STREQUAL "sdl2")
+    find_dependency(SDL2 CONFIG)
+endif()
+
+if(NOT WIN32)
+    find_dependency(CURL)
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/EuiNeoTargets.cmake")
+
+check_required_components(EuiNeo)
+]=])
+
+    configure_package_config_file(
+        "${EUI_NEO_CONFIG_TEMPLATE}"
+        "${CMAKE_CURRENT_BINARY_DIR}/EuiNeoConfig.cmake"
+        INSTALL_DESTINATION "${EUI_NEO_INSTALL_CMAKEDIR}"
+    )
+
+    install(EXPORT EuiNeoTargets
+        FILE EuiNeoTargets.cmake
+        NAMESPACE eui::
+        DESTINATION "${EUI_NEO_INSTALL_CMAKEDIR}"
+    )
+    install(FILES
+        "${CMAKE_CURRENT_BINARY_DIR}/EuiNeoConfig.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/EuiNeoConfigVersion.cmake"
+        DESTINATION "${EUI_NEO_INSTALL_CMAKEDIR}"
+    )
 endif()

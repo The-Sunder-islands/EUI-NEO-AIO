@@ -177,6 +177,12 @@ inline void Runtime::renderElement(
                                                  canvasInst.frame.value().height},
                                                 canvasInst.frame.value(),
                                                 canvasInst.transform.value()), dpiScale);
+        visual = applyRenderTransform(visual, renderTransform);
+        if ((!dirtyRect || intersects(visual, *dirtyRect)) &&
+            (!effectiveHasScissor || intersects(visual, effectiveScissor))) {
+            applyOptionalScissor(renderBackend, effectiveHasScissor, effectiveScissor, windowHeight);
+            renderCanvas(renderBackend, element, windowWidth, windowHeight, dpiScale, renderTransform);
+        }
     } else if (element.kind == ElementKind::Shadertoy) {
         runtime::ShaderToyInstance& instance = shaderToyInstance(element.id);
         Rect visual = toPixelRect(imageVisualRect(instance.frame.value(), instance.transform.value()), dpiScale);
@@ -184,7 +190,6 @@ inline void Runtime::renderElement(
         if ((!dirtyRect || intersects(visual, *dirtyRect)) &&
             (!effectiveHasScissor || intersects(visual, effectiveScissor))) {
             applyOptionalScissor(renderBackend, effectiveHasScissor, effectiveScissor, windowHeight);
-            renderCanvas(renderBackend, element, windowWidth, windowHeight, dpiScale, renderTransform);
             renderShaderToy(element, windowWidth, windowHeight, dpiScale, renderTransform);
         }
     }

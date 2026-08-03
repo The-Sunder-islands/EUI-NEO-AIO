@@ -1,0 +1,1 @@
+/home/starlight/EUI-NEO-AIO/android/app/CMakeLists.txt

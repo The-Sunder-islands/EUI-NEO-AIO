@@ -1,0 +1,4 @@
+/home/starlight/android-sdk/cmake/3.22.1/bin/ninja \
+  -C \
+  /home/starlight/EUI-NEO-AIO/android/app/.cxx/Debug/413b1j18/arm64-v8a \
+  eui-neo

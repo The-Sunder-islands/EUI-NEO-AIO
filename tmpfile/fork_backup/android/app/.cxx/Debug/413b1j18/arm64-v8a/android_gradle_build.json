@@ -1,0 +1,40 @@
+{
+  "buildFiles": [
+    "/home/starlight/EUI-NEO-AIO/android/app/CMakeLists.txt"
+  ],
+  "cleanCommandsComponents": [
+    [
+      "/home/starlight/android-sdk/cmake/3.22.1/bin/ninja",
+      "-C",
+      "/home/starlight/EUI-NEO-AIO/android/app/.cxx/Debug/413b1j18/arm64-v8a",
+      "clean"
+    ]
+  ],
+  "buildTargetsCommandComponents": [
+    "/home/starlight/android-sdk/cmake/3.22.1/bin/ninja",
+    "-C",
+    "/home/starlight/EUI-NEO-AIO/android/app/.cxx/Debug/413b1j18/arm64-v8a",
+    "{LIST_OF_TARGETS_TO_BUILD}"
+  ],
+  "libraries": {
+    "eui-neo::@6890427a1f51a3e7e1df": {
+      "toolchain": "toolchain",
+      "abi": "arm64-v8a",
+      "artifactName": "eui-neo",
+      "output": "/home/starlight/EUI-NEO-AIO/android/app/build/intermediates/cxx/Debug/413b1j18/obj/arm64-v8a/libeui-neo.so",
+      "runtimeFiles": []
+    }
+  },
+  "toolchains": {
+    "toolchain": {
+      "cCompilerExecutable": "/home/starlight/android-sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/linux-x86_64/bin/clang.lld",
+      "cppCompilerExecutable": "/home/starlight/android-sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++.lld"
+    }
+  },
+  "cFileExtensions": [
+    "c"
+  ],
+  "cppFileExtensions": [
+    "cpp"
+  ]
+}

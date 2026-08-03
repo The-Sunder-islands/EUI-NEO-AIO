@@ -492,6 +492,11 @@ inline Transform Runtime::currentElementTransform(const Element& element) const 
         if (instance != images_.end()) {
             return instance->second.transform.value();
         }
+    } else if (element.kind == ElementKind::Shadertoy) {
+        const auto instance = shaderToys_.find(element.id);
+        if (instance != shaderToys_.end()) {
+            return instance->second.transform.value();
+        }
     } else if (element.kind == ElementKind::Row ||
                element.kind == ElementKind::Column ||
                element.kind == ElementKind::Stack) {
@@ -507,7 +512,8 @@ inline TransformMatrix Runtime::hitMatrixForElement(const Element& element, floa
     if (element.kind == ElementKind::Rect ||
         element.kind == ElementKind::Polygon ||
         element.kind == ElementKind::Text ||
-        element.kind == ElementKind::Image || element.kind == ElementKind::Svg) {
+        element.kind == ElementKind::Image || element.kind == ElementKind::Svg ||
+        element.kind == ElementKind::Shadertoy) {
         return combinedPrimitiveMatrix(renderTransform, bounds, scaleTransform(currentElementTransform(element), dpiScale));
     }
     return renderTransform.matrix;

@@ -93,7 +93,7 @@ public:
         const std::function<void(const std::string&)> onChange = onChange_;
         const std::function<void()> onEnter = onEnter_;
         const std::function<void(bool)> onFocus = onFocus_;
-        const float textLineHeight = fontSize;
+        const float textLineHeight = multiline_ ? fontSize * 1.2f : fontSize;
         const float textY = multiline_ ? inset : std::max(0.0f, (height_ - textLineHeight) * 0.5f);
         const float textHeight = multiline_ ? std::max(0.0f, height_ - inset * 2.0f) : textLineHeight;
         const float width = width_;
@@ -162,7 +162,7 @@ public:
                     .shadow(focused ? style_.shadow : core::Shadow{})
                     .transition(transition_)
                     .focusable()
-                    .imeRect(caretX, layout.cursorY, 1.5f, textLineHeight)
+                    .imeRect(hasComposition ? compositionX : caretX, layout.cursorY, 1.5f, textLineHeight)
                     .onPress([&state, width, inset, layout](const core::PointerEvent& event, const core::Rect& bounds) {
                         state.lastBounds = bounds;
                         state.cursor = InputModel::clampUtf8Boundary(state.text, layout.cursorFromPointer(event.x, event.y, bounds, width, inset));
@@ -186,6 +186,7 @@ public:
                 if (allowMultiline && layout.maxVerticalScroll > 0.0f) {
                     hit.onScroll([&state, layout, fontSize](const core::ScrollEvent& event) {
                         const float step = std::max(12.0f, fontSize * 2.2f);
+                        state.followCaret = false;
                         state.verticalScroll = std::clamp(
                             state.verticalScroll - static_cast<float>(event.y) * step,
                             0.0f,
@@ -193,6 +194,7 @@ public:
                     });
                 }
                 hit.onTextInput([&state, allowMultiline, onChange, onEnter, width, inset, fontSize, fontFamily, textHeight](const core::KeyboardEvent& event) {
+                        state.followCaret = true;
                         bool changed = false;
                         const std::string nextComposition = event.composing ? InputModel::filteredText(event.compositionText, allowMultiline) : std::string{};
                         if (state.compositionText != nextComposition) {
@@ -338,85 +340,92 @@ public:
                     })
                     .build();
 
-                if (hasSelection) {
-                    for (size_t index = 0; index < layout.selectionRects.size(); ++index) {
-                        const auto& selectionRect = layout.selectionRects[index];
-                        ui_.rect(id_ + ".selection." + std::to_string(index))
-                            .position(selectionRect.x, selectionRect.y)
-                            .size(selectionRect.width, selectionRect.height)
-                            .color(theme::withAlpha(style_.cursor, 0.24f))
-                            .radius(multiline_ ? 0.0f : 3.0f)
-                            .build();
-                    }
-                }
-
-                if (multiline_ && !empty) {
-                    const auto& lines = layout.lineList();
-                    for (std::size_t index = 0; index < lines.size(); ++index) {
-                        const auto& line = lines[index];
-                        const float y = textY + static_cast<float>(index) * textLineHeight - state.verticalScroll;
-                        if (y + textLineHeight < textY || y > textY + textHeight) {
-                            continue;
+                ui_.stack(id_ + ".textViewport")
+                    .position(inset, textY)
+                    .size(textWidth, textHeight)
+                    .clip()
+                    .content([&] {
+                        if (hasSelection) {
+                            for (size_t index = 0; index < layout.selectionRects.size(); ++index) {
+                                const auto& selectionRect = layout.selectionRects[index];
+                                ui_.rect(id_ + ".selection." + std::to_string(index))
+                                    .position(selectionRect.x - inset, selectionRect.y - textY)
+                                    .size(selectionRect.width, selectionRect.height)
+                                    .color(theme::withAlpha(style_.cursor, 0.24f))
+                                    .radius(multiline_ ? 0.0f : 3.0f)
+                                    .build();
+                            }
                         }
-                        ui_.text(id_ + ".text." + std::to_string(index))
-                            .position(inset, y)
-                            .size(layout.visibleTextWidth, textLineHeight)
-                            .dirtyKey(textDirtyKey + "|" + std::to_string(index))
-                            .text(state.text.substr(static_cast<std::size_t>(line.start),
-                                                    static_cast<std::size_t>(std::max(0, line.end - line.start))))
-                            .fontSize(fontSize)
-                            .fontFamily(fontFamily_)
-                            .lineHeight(textLineHeight)
-                            .color(style_.text)
-                            .wrap(false)
-                            .verticalAlign(core::VerticalAlign::Top)
-                            .build();
-                    }
-                } else {
-                    ui_.text(id_ + ".text")
-                        .position(inset - state.horizontalScroll, textY - state.verticalScroll)
-                        .size(layout.visibleTextWidth, renderedTextHeight)
-                        .dirtyKey(textDirtyKey)
-                        .text(empty ? placeholder_ : state.text)
-                        .fontSize(fontSize)
-                        .fontFamily(fontFamily_)
-                        .lineHeight(textLineHeight)
-                        .color(empty ? style_.placeholder : style_.text)
-                        .wrap(false)
-                        .verticalAlign(core::VerticalAlign::Top)
-                        .build();
-                }
 
-                if (hasComposition) {
-                    ui_.rect(id_ + ".composition.bg")
-                        .position(compositionX, layout.cursorY)
-                        .size(compositionWidth, textLineHeight)
-                        .color(theme::withAlpha(style_.focused, 0.82f))
-                        .radius(2.0f)
-                        .build();
+                        if (multiline_ && !empty) {
+                            const auto& lines = layout.lineList();
+                            for (std::size_t index = 0; index < lines.size(); ++index) {
+                                const auto& line = lines[index];
+                                const float y = static_cast<float>(index) * textLineHeight - state.verticalScroll;
+                                if (y + textLineHeight < 0.0f || y > textHeight) {
+                                    continue;
+                                }
+                                ui_.text(id_ + ".text." + std::to_string(index))
+                                    .position(0.0f, y)
+                                    .size(layout.visibleTextWidth, textLineHeight)
+                                    .dirtyKey(textDirtyKey + "|" + std::to_string(index))
+                                    .text(state.text.substr(static_cast<std::size_t>(line.start),
+                                                            static_cast<std::size_t>(std::max(0, line.end - line.start))))
+                                    .fontSize(fontSize)
+                                    .fontFamily(fontFamily_)
+                                    .lineHeight(textLineHeight)
+                                    .color(style_.text)
+                                    .wrap(false)
+                                    .verticalAlign(core::VerticalAlign::Top)
+                                    .build();
+                            }
+                        } else {
+                            ui_.text(id_ + ".text")
+                                .position(-state.horizontalScroll, -state.verticalScroll)
+                                .size(layout.visibleTextWidth, renderedTextHeight)
+                                .dirtyKey(textDirtyKey)
+                                .text(empty ? placeholder_ : state.text)
+                                .fontSize(fontSize)
+                                .fontFamily(fontFamily_)
+                                .lineHeight(textLineHeight)
+                                .color(empty ? style_.placeholder : style_.text)
+                                .wrap(false)
+                                .verticalAlign(core::VerticalAlign::Top)
+                                .build();
+                        }
 
-                    ui_.text(id_ + ".composition")
-                        .position(compositionX + compositionPadding, layout.cursorY)
-                        .size(std::max(1.0f, compositionWidth - compositionPadding * 2.0f), textLineHeight)
-                        .dirtyKey(compositionDirtyKey)
-                        .text(state.compositionText)
-                        .fontSize(fontSize)
-                        .fontFamily(fontFamily_)
-                        .lineHeight(textLineHeight)
-                        .color(style_.text)
-                        .wrap(false)
-                        .verticalAlign(core::VerticalAlign::Top)
-                        .build();
-                }
+                        if (hasComposition) {
+                            ui_.rect(id_ + ".composition.bg")
+                                .position(compositionX - inset, layout.cursorY - textY)
+                                .size(compositionWidth, textLineHeight)
+                                .color(theme::withAlpha(style_.focused, 0.82f))
+                                .radius(2.0f)
+                                .build();
 
-                if (focused) {
-                    ui_.rect(id_ + ".cursor")
-                        .position(caretX, layout.cursorY)
-                        .size(1.5f, fontSize * 1.18f)
-                        .color(style_.cursor)
-                        .radius(1.0f)
-                        .build();
-                }
+                            ui_.text(id_ + ".composition")
+                                .position(compositionX + compositionPadding - inset, layout.cursorY - textY)
+                                .size(std::max(1.0f, compositionWidth - compositionPadding * 2.0f), textLineHeight)
+                                .dirtyKey(compositionDirtyKey)
+                                .text(state.compositionText)
+                                .fontSize(fontSize)
+                                .fontFamily(fontFamily_)
+                                .lineHeight(textLineHeight)
+                                .color(style_.text)
+                                .wrap(false)
+                                .verticalAlign(core::VerticalAlign::Top)
+                                .build();
+                        }
+
+                        if (focused) {
+                            ui_.rect(id_ + ".cursor")
+                                .position(caretX - inset, layout.cursorY - textY)
+                                .size(1.5f, fontSize * 1.18f)
+                                .color(style_.cursor)
+                                .radius(1.0f)
+                                .build();
+                        }
+                    })
+                    .build();
             })
             .build();
     }
@@ -438,12 +447,12 @@ private:
     std::string placeholder_ = "Hello EUI-NEO 😉";
     bool multiline_ = false;
     float width_ = 260.0f;
-    float height_ = 40.0f;
+    float height_ = 44.0f;
     float x_ = 0.0f;
     float y_ = 0.0f;
     float inset_ = -1.0f;
     float fontSize_ = 0.0f;
-    std::string fontFamily_ = "monospace";
+    std::string fontFamily_ = "Microsoft YaHei";
     bool hasX_ = false;
     bool hasY_ = false;
 };

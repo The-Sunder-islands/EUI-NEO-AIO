@@ -1,0 +1,11 @@
+/build
+/build-*/
+/build_*/
+/build-sdl2
+/参考
+/build-check
+.DS_Store
+/docs/releases/
+/tmp/
+/temp/
+/.github/skills/

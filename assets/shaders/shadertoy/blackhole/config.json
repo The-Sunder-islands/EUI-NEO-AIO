@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "passes": [
+    {
+      "name": "pass0",
+      "source": "1.frag",
+      "channels": [
+        {"kind": "image", "source": "color_noise.png"},
+        {"kind": "image", "source": "london.png"},
+        {"kind": "self"},
+        {"kind": "none"}
+      ]
+    },
+    {
+      "name": "pass1",
+      "source": "2.frag",
+      "channels": [{"kind": "buffer", "source": "pass0"}]
+    },
+    {
+      "name": "pass2",
+      "source": "3.frag",
+      "channels": [{"kind": "buffer", "source": "pass1"}]
+    },
+    {
+      "name": "pass3",
+      "source": "4.frag",
+      "channels": [{"kind": "buffer", "source": "pass2"}]
+    },
+    {
+      "name": "pass4",
+      "source": "5.frag",
+      "channels": [
+        {"kind": "buffer", "source": "pass0"},
+        {"kind": "buffer", "source": "pass1"},
+        {"kind": "buffer", "source": "pass2"},
+        {"kind": "buffer", "source": "pass3"}
+      ]
+    }
+  ]
+}

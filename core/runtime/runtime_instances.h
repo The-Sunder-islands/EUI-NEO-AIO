@@ -1,5 +1,7 @@
 #pragma once
 
+#include <core/render/shadertoy_primitive.h>
+
 #include "core/dsl.h"
 #include "core/render/canvas.h"
 #include "core/render/image.h"
@@ -95,6 +97,7 @@ struct ImageInstance {
     AnimatedValue<LayoutRect> frame;
     AnimatedValue<Color> tint;
     AnimatedValue<float> radius;
+    AnimatedValue<float> blur;
     AnimatedValue<float> opacity;
     AnimatedValue<Transform> transform;
     std::string source;
@@ -117,6 +120,20 @@ struct CanvasInstance {
     std::function<void(render::CanvasContext&)> onDraw;
     int lastWindowWidth = 0;
     int lastWindowHeight = 0;
+};
+
+struct ShaderToyInstance {
+    std::unique_ptr<ShaderToyPrimitive> primitive = std::make_unique<ShaderToyPrimitive>();
+    bool initialized = false;
+    bool seen = false;
+    AnimatedValue<LayoutRect> frame;
+    AnimatedValue<float> radius;
+    AnimatedValue<float> opacity;
+    AnimatedValue<Transform> transform;
+    std::uint64_t graphHash = 0;
+    std::uint64_t resetKey = 0;
+    std::uint64_t reportedErrorHash = 0;
+};
 };
 
 struct InteractionInstance {

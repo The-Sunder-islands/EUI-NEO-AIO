@@ -1,0 +1,27 @@
+{
+  "buildFiles": [
+    "/home/starlight/EUI-NEO-AIO/android/app/CMakeLists.txt"
+  ],
+  "cleanCommandsComponents": [
+    [
+      "/home/starlight/android-sdk/cmake/3.22.1/bin/ninja",
+      "-C",
+      "/home/starlight/EUI-NEO-AIO/android/app/.cxx/Debug/413b1j18/x86_64",
+      "clean"
+    ]
+  ],
+  "buildTargetsCommandComponents": [
+    "/home/starlight/android-sdk/cmake/3.22.1/bin/ninja",
+    "-C",
+    "/home/starlight/EUI-NEO-AIO/android/app/.cxx/Debug/413b1j18/x86_64",
+    "{LIST_OF_TARGETS_TO_BUILD}"
+  ],
+  "libraries": {
+    "eui-neo::@6890427a1f51a3e7e1df": {
+      "artifactName": "eui-neo",
+      "abi": "x86_64",
+      "output": "/home/starlight/EUI-NEO-AIO/android/app/build/intermediates/cxx/Debug/413b1j18/obj/x86_64/libeui-neo.so",
+      "runtimeFiles": []
+    }
+  }
+}

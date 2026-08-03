@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.14)
-project(EUI-NEO VERSION 0.5.3)
+project(EUI-NEO VERSION 0.5.4)
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
@@ -106,8 +106,10 @@ endfunction()
 set(EUI_VULKAN_BACKEND_SOURCES
     core/render/vulkan/vulkan_backend.cpp
     core/render/vulkan/vulkan_cache.cpp
+    core/render/vulkan/vulkan_canvas.cpp
     core/render/vulkan/vulkan_primitives.cpp
     core/render/vulkan/vulkan_polygon.cpp
+    core/render/vulkan/vulkan_shadertoy.cpp
     core/render/vulkan/vulkan_text.cpp
     core/render/vulkan/vulkan_image.cpp
 )
@@ -151,11 +153,15 @@ set(CORE_SOURCES
     core/platform/native_bridge.c
     core/platform/performance_stats.cpp
     core/platform/platform.cpp
+    core/render/canvas.cpp
     core/render/image.cpp
     core/render/image_facade.cpp
     core/render/image_source.cpp
     core/render/primitive.cpp
     core/render/render_backend.cpp
+    core/render/shadertoy.cpp
+    core/render/shadertoy_json.cpp
+    core/render/shadertoy_primitive.cpp
     core/render/stb_image_impl.cpp
     core/render/text.cpp
     core/platform/tray_bridge.c
@@ -167,6 +173,7 @@ if(EUI_RESOLVED_RENDER_BACKEND STREQUAL "opengl")
         core/render/opengl/opengl_backend.cpp
         core/render/opengl/opengl_image.cpp
         core/render/opengl/opengl_primitives.cpp
+        core/render/opengl/opengl_shadertoy.cpp
         core/render/opengl/opengl_text.cpp
     )
 elseif(EUI_RESOLVED_RENDER_BACKEND STREQUAL "vulkan")
@@ -200,6 +207,20 @@ target_link_libraries(eui_neo PUBLIC Threads::Threads)
 target_compile_features(eui_neo PUBLIC cxx_std_17)
 target_compile_definitions(eui_neo PRIVATE YYJSON_DISABLE_WRITER=1)
 eui_apply_compile_options(eui_neo)
+
+if(EUI_RESOLVED_RENDER_BACKEND STREQUAL "vulkan")
+    add_executable(eui_shadertoy_wrap
+        scripts/shadertoy_wrap.cpp
+        core/render/shadertoy.cpp
+    )
+    target_include_directories(eui_shadertoy_wrap PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_compile_features(eui_shadertoy_wrap PRIVATE cxx_std_17)
+    eui_apply_compile_options(eui_shadertoy_wrap)
+    set_target_properties(eui_shadertoy_wrap PROPERTIES
+        EXPORT_NAME shadertoy_wrap)
+endif()
+
+include("${CMAKE_CURRENT_SOURCE_DIR}/scripts/EuiShaderToy.cmake")
 
 set(EUI_YYJSON_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/3rd/yyjson-0.12.0/src/yyjson.c")
 if(EUI_BUILD_SHARED)
@@ -278,10 +299,7 @@ endif()
 # App target helpers
 # -----------------------------------------------------------------------------
 
-set(APP_ASSET_FILES)
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets")
-    file(GLOB APP_ASSET_FILES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/assets/*")
-endif()
+set(EUI_APP_ASSETS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets")
 
 set(APP_ICON_RESOURCE)
 if(WIN32)
@@ -294,13 +312,22 @@ if(WIN32)
 endif()
 
 function(eui_neo_copy_assets target_name)
-    if(APP_ASSET_FILES)
-        add_custom_command(TARGET ${target_name} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:${target_name}>/assets
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${APP_ASSET_FILES} $<TARGET_FILE_DIR:${target_name}>/assets
-        )
+    if(EXISTS "${EUI_APP_ASSETS_DIR}")
+        add_dependencies(${target_name} eui_app_assets)
     endif()
 endfunction()
+
+if(EXISTS "${EUI_APP_ASSETS_DIR}" AND
+   (EUI_BUILD_APPS OR EUI_BUILD_USER_APPS OR EUI_BUILD_TEST_FIXTURES))
+    add_custom_target(eui_app_assets
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "$<TARGET_FILE_DIR:eui_neo>/assets"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${EUI_APP_ASSETS_DIR}"
+            "$<TARGET_FILE_DIR:eui_neo>/assets"
+        VERBATIM
+    )
+endif()
 
 function(eui_neo_copy_runtime_dependencies target_name)
     if(EUI_BUILD_SHARED AND EUI_WINDOW_BACKEND STREQUAL "glfw")
@@ -344,6 +371,58 @@ if(EUI_BUILD_APPS)
         endif()
         add_executable(${app_name} ${EUI_APP_MAIN_SOURCE} "${app_source}" ${APP_ICON_RESOURCE})
         eui_neo_configure_app(${app_name})
+        if(app_name STREQUAL "shadertoy")
+            set(shadertoy_demo_spirv
+                "${CMAKE_CURRENT_BINARY_DIR}/shaders/shadertoy_demo.frag.spv")
+            set(shadertoy_demo_source
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders/shadertoy/demo.frag")
+            set(shadertoy_presets_dir
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders/shadertoy")
+            set(shadertoy_preset_spirv_dir
+                "${CMAKE_CURRENT_BINARY_DIR}/shadertoy-example-presets")
+            target_compile_definitions(shadertoy PRIVATE
+                EUI_SHADERTOY_DEMO_SOURCE="${shadertoy_demo_source}"
+                EUI_SHADERTOY_DEMO_SPIRV="${shadertoy_demo_spirv}"
+                EUI_SHADERTOY_PRESETS_DIR="${shadertoy_presets_dir}"
+                EUI_SHADERTOY_PRESET_SPIRV_DIR="${shadertoy_preset_spirv_dir}")
+            if(EUI_RESOLVED_RENDER_BACKEND STREQUAL "vulkan")
+                eui_compile_shadertoy(shadertoy
+                    SOURCE "${shadertoy_demo_source}"
+                    OUTPUT "${shadertoy_demo_spirv}")
+                if(EXISTS "${shadertoy_presets_dir}")
+                    foreach(preset_name IN ITEMS blackhole fish)
+                        string(TOLOWER "${preset_name}" preset_asset_name)
+                        if(preset_name STREQUAL "blackhole")
+                            set(preset_pass_count 5)
+                        else()
+                            set(preset_pass_count 2)
+                        endif()
+                        foreach(pass_number RANGE 1 ${preset_pass_count})
+                            eui_compile_shadertoy(shadertoy
+                                SOURCE "assets/shaders/shadertoy/${preset_asset_name}/${pass_number}.frag"
+                                OUTPUT "${shadertoy_preset_spirv_dir}/${preset_asset_name}/${pass_number}.frag.spv")
+                        endforeach()
+                    endforeach()
+                endif()
+            endif()
+        endif()
+        if(app_name STREQUAL "gallery")
+            set(gallery_shadertoy_spirv
+                "${CMAKE_CURRENT_BINARY_DIR}/shaders/gallery_shadertoy_demo.frag.spv")
+            target_compile_definitions(gallery PRIVATE
+                EUI_GALLERY_SHADERTOY_SOURCE="${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders/shadertoy/demo.frag"
+                EUI_GALLERY_SHADERTOY_NOISE="${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders/shadertoy/blackhole/color_noise.png"
+                EUI_GALLERY_SHADERTOY_SPIRV="${gallery_shadertoy_spirv}")
+            if(EUI_RESOLVED_RENDER_BACKEND STREQUAL "vulkan")
+                eui_compile_shadertoy(gallery
+                    SOURCE "assets/shaders/shadertoy/demo.frag"
+                    OUTPUT "${gallery_shadertoy_spirv}")
+            endif()
+        endif()
+        if(app_name STREQUAL "serial_tool" AND
+           EUI_ENABLE_MODULES AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/modules/serial/serial.h")
+            target_link_libraries(${app_name} PRIVATE eui::module_serial)
+        endif()
     endforeach()
 endif()
 
@@ -387,9 +466,56 @@ if(EUI_BUILD_TEST_FIXTURES)
         get_filename_component(probe_name "${probe_source}" NAME_WE)
         add_executable(${probe_name} "${probe_source}")
         eui_neo_configure_app(${probe_name})
+        if(MSVC)
+            target_link_options(${probe_name} PRIVATE /SUBSYSTEM:CONSOLE)
+        endif()
+        target_compile_definitions(${probe_name} PRIVATE EUI_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
         add_test(NAME ${probe_name} COMMAND ${probe_name} --frames 3)
         set_tests_properties(${probe_name} PROPERTIES LABELS "probe")
     endforeach()
+
+    if(EUI_RESOLVED_RENDER_BACKEND STREQUAL "vulkan" AND TARGET shadertoy_probe)
+        set(shadertoy_probe_assets_dir
+            "${CMAKE_CURRENT_BINARY_DIR}/shadertoy-test-assets")
+        eui_compile_shadertoy(shadertoy_probe
+            SOURCE "tests/assets/shadertoy/feedback.frag"
+            OUTPUT "${shadertoy_probe_assets_dir}/feedback.frag.spv"
+        )
+        eui_compile_shadertoy(shadertoy_probe
+            SOURCE "tests/assets/shadertoy/buffer.frag"
+            OUTPUT "${shadertoy_probe_assets_dir}/buffer.frag.spv"
+            UNIFORMS "uValue:float"
+        )
+        eui_compile_shadertoy(shadertoy_probe
+            SOURCE "tests/assets/shadertoy/channels.frag"
+            OUTPUT "${shadertoy_probe_assets_dir}/channels.frag.spv"
+            UNIFORMS "uValue:float"
+        )
+        eui_compile_shadertoy(shadertoy_probe
+            SOURCE "tests/assets/shadertoy/pass_contract.frag"
+            OUTPUT "${shadertoy_probe_assets_dir}/pass_contract.frag.spv"
+        )
+        set(EUI_SHADERTOY_INLINE_TEST_SOURCE
+            "void mainImage(out vec4 color, in vec2 coord) { color = vec4(0.3, 0.4, 0.5, 1.0); }")
+        eui_compile_shadertoy_inline(shadertoy_probe
+            CONTENT "${EUI_SHADERTOY_INLINE_TEST_SOURCE}"
+            OUTPUT "${shadertoy_probe_assets_dir}/inline.frag.spv"
+        )
+        set(EUI_SHADERTOY_HOT_RELOAD_INITIAL_SOURCE
+            "void mainImage(out vec4 color, in vec2 coord) { color = vec4(0.2, 0.0, 0.0, 1.0); }")
+        eui_compile_shadertoy_inline(shadertoy_probe
+            CONTENT "${EUI_SHADERTOY_HOT_RELOAD_INITIAL_SOURCE}"
+            OUTPUT "${shadertoy_probe_assets_dir}/hot_reload_initial.frag.spv"
+        )
+        set(EUI_SHADERTOY_HOT_RELOAD_RECOVERED_SOURCE
+            "void mainImage(out vec4 color, in vec2 coord) { color = vec4(0.7, 0.0, 0.0, 1.0); }")
+        eui_compile_shadertoy_inline(shadertoy_probe
+            CONTENT "${EUI_SHADERTOY_HOT_RELOAD_RECOVERED_SOURCE}"
+            OUTPUT "${shadertoy_probe_assets_dir}/hot_reload_recovered.frag.spv"
+        )
+        target_compile_definitions(shadertoy_probe PRIVATE
+            EUI_TEST_SHADERS_DIR="${shadertoy_probe_assets_dir}")
+    endif()
 
     file(GLOB TEST_UNIT_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit/*.cpp")
     foreach(unit_source ${TEST_UNIT_SOURCES})
@@ -425,6 +551,13 @@ if(EUI_ENABLE_INSTALL)
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
         INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
     )
+    if(TARGET eui_shadertoy_wrap)
+        install(TARGETS eui_shadertoy_wrap
+            EXPORT EuiNeoTargets
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+        install(FILES scripts/EuiShaderToy.cmake
+            DESTINATION ${EUI_NEO_INSTALL_CMAKEDIR})
+    endif()
     set(EUI_NEO_INSTALL_DEP_TARGETS freetype png_static eui_zlib eui_md4c SDL2-static)
     if(EUI_OWNS_GLAD_TARGET)
         list(APPEND EUI_NEO_INSTALL_DEP_TARGETS glad)
@@ -542,6 +675,10 @@ if(NOT WIN32)
 endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/EuiNeoTargets.cmake")
+
+if(EUI_NEO_RENDER_BACKEND STREQUAL "vulkan")
+    include("${CMAKE_CURRENT_LIST_DIR}/EuiShaderToy.cmake")
+endif()
 
 check_required_components(EuiNeo)
 ]=])

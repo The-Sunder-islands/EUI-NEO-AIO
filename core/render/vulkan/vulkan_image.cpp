@@ -42,14 +42,18 @@ bool VulkanRenderBackend::updateTexture(TextureHandle handle, const unsigned cha
         endActiveRenderPass();
     }
 
-    if (texture->image == VK_NULL_HANDLE || texture->width != width || texture->height != height || texture->channels != 4) {
+    constexpr VkFormat kTextureFormat = VK_FORMAT_R8G8B8A8_UNORM;
+    if (texture->image == VK_NULL_HANDLE || texture->width != width ||
+        texture->height != height || texture->channels != 4 ||
+        texture->format != kTextureFormat) {
         destroyTextureResource(*texture);
 
         if (!createTargetImage(*texture,
                                width,
                                height,
-                               VK_FORMAT_R8G8B8A8_UNORM,
-                               VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT) ||
+                               kTextureFormat,
+                               VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                                   VK_IMAGE_USAGE_SAMPLED_BIT) ||
             !ensureTextureSampler(*texture)) {
             destroyTextureResource(*texture);
             return false;
@@ -76,7 +80,9 @@ bool VulkanRenderBackend::updateTexture(TextureHandle handle, const unsigned cha
     copyRegion.imageExtent = {static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(height), 1};
     vkCmdCopyBufferToImage(commandBuffer, stagingBuffer, texture->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
 
-    transitionImageLayout(commandBuffer, texture->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    transitionImageLayout(commandBuffer, texture->image,
+                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     texture->layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     ++texture->generation;
     beginLoadPass();
@@ -103,6 +109,7 @@ void VulkanRenderBackend::drawTexture(TextureHandle handle,
                                       const core::Color& tint,
                                       const core::Rect& rect,
                                       float radius,
+                                      float blur,
                                       int windowWidth,
                                       int windowHeight) {
     auto* texture = static_cast<TextureResource*>(handle);
@@ -145,6 +152,7 @@ void VulkanRenderBackend::drawTexture(TextureHandle handle,
     constants.rect[2] = rect.width;
     constants.rect[3] = rect.height;
     constants.flags[0] = radius;
+    constants.flags[1] = blur;
 
     const VkDeviceSize offset = static_cast<VkDeviceSize>(floatOffset * sizeof(float));
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, imagePipeline_);

@@ -192,6 +192,7 @@ tests/        probe 源码、fixture 应用和本地 benchmark 记录
 - [网络](docs/网络.md)
 - [平台能力](docs/平台能力.md)
 - [集成指南](docs/集成指南.md)
+- [Shadertoy 底层图元](docs/Shadertoy.md)
 - [开发与发布](docs/开发与发布.md)
 
 ## 许可

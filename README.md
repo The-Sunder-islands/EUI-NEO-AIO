@@ -5,7 +5,6 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/sudoevolve/EUI-NEO/actions/workflows/release.yml"><img alt="Release Build" src="https://github.com/sudoevolve/EUI-NEO/actions/workflows/release.yml/badge.svg"></a>
   <a href="https://github.com/sudoevolve/EUI-NEO/releases"><img alt="Release" src="https://img.shields.io/github/v/release/sudoevolve/EUI-NEO?include_prereleases&sort=semver"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache%202.0-blue"></a>
   <img alt="C++17" src="https://img.shields.io/badge/C%2B%2B-17-00599C?logo=cplusplus&logoColor=white">
@@ -191,6 +190,7 @@ tests/        Probe sources, fixture apps, and local benchmark notes
 - [Network](docs/网络.md)
 - [Platform Capabilities](docs/平台能力.md)
 - [Integration Guide](docs/集成指南.md)
+- [Shadertoy Primitive](docs/Shadertoy.md)
 - [Development And Release](docs/开发与发布.md)
 
 ## License

@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "passes": [
+    {
+      "name": "pass0",
+      "source": "1.frag",
+      "channels": [{"kind": "self"}]
+    },
+    {
+      "name": "pass1",
+      "source": "2.frag",
+      "channels": [{"kind": "buffer", "source": "pass0"}]
+    }
+  ]
+}

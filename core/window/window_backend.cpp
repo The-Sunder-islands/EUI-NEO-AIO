@@ -6,9 +6,6 @@
 #if defined(EUI_WINDOW_BACKEND_SDL2)
 
 #include <SDL.h>
-#if defined(_WIN32) || defined(__APPLE__)
-#include <SDL_syswm.h>
-#endif
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -18,8 +15,13 @@
 #endif
 #include <windows.h>
 #include <imm.h>
-#endif
 
+#include <new>
+#include <unordered_map>
+#endif
+#if defined(_WIN32) || defined(__APPLE__)
+#include <SDL_syswm.h>
+#endif
 namespace core::window {
 
 namespace {
@@ -36,21 +38,168 @@ void configureOpenGLWindowAttributes() {
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
 }
 
-} // namespace
-
 #if defined(_WIN32)
-namespace {
 
-LONG roundLong(float value) {
-    return static_cast<LONG>(value >= 0.0f ? value + 0.5f : value - 0.5f);
+struct SdlImeFilterState {
+    WNDPROC previousProc = nullptr;
+    SDL_Rect rect{};
+    bool hasRect = false;
+    bool applying = false;
+    UINT_PTR reapplyTimer = 0;
+};
+
+std::unordered_map<HWND, SdlImeFilterState*> gSdlImeFilters;
+
+SdlImeFilterState* sdlImeState(HWND hwnd) {
+    const auto iterator = gSdlImeFilters.find(hwnd);
+    return iterator != gSdlImeFilters.end() ? iterator->second : nullptr;
 }
 
-HWND hwndForWindow(Handle window) {
-    return static_cast<HWND>(nativeWindowInfo(window).platformWindow);
+HWND hwndForSdlWindow(SDL_Window* window) {
+    if (window == nullptr) {
+        return nullptr;
+    }
+
+    SDL_SysWMinfo info{};
+    SDL_VERSION(&info.version);
+    if (SDL_GetWindowWMInfo(window, &info) != SDL_TRUE ||
+        info.subsystem != SDL_SYSWM_WINDOWS) {
+        return nullptr;
+    }
+    return info.info.win.window;
 }
+
+void applySdlImeRect(HWND hwnd, const SDL_Rect& rect) {
+    HIMC context = ImmGetContext(hwnd);
+    if (context == nullptr) {
+        return;
+    }
+
+    LOGFONTW font{};
+    const HFONT defaultFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+    if (defaultFont != nullptr &&
+        GetObjectW(defaultFont, sizeof(font), &font) == sizeof(font)) {
+        font.lfHeight = -std::max(12, rect.h);
+        font.lfQuality = CLEARTYPE_QUALITY;
+        ImmSetCompositionFontW(context, &font);
+    }
+
+    COMPOSITIONFORM composition{};
+    composition.dwStyle = CFS_FORCE_POSITION;
+    composition.ptCurrentPos.x = rect.x;
+    composition.ptCurrentPos.y = rect.y;
+    composition.rcArea.left = rect.x;
+    composition.rcArea.top = rect.y;
+    composition.rcArea.right = rect.x + rect.w;
+    composition.rcArea.bottom = rect.y + rect.h;
+    ImmSetCompositionWindow(context, &composition);
+
+    CANDIDATEFORM candidate{};
+    candidate.dwIndex = 0;
+    candidate.dwStyle = CFS_EXCLUDE;
+    candidate.ptCurrentPos = composition.ptCurrentPos;
+    candidate.rcArea = composition.rcArea;
+    ImmSetCandidateWindow(context, &candidate);
+
+    ImmReleaseContext(hwnd, context);
+}
+
+void reapplySdlImeRect(HWND hwnd, SdlImeFilterState* state) {
+    if (state == nullptr || !state->hasRect || state->applying) {
+        return;
+    }
+
+    state->applying = true;
+    applySdlImeRect(hwnd, state->rect);
+    if (sdlImeState(hwnd) == state) {
+        state->applying = false;
+    }
+}
+
+LRESULT CALLBACK sdlImeWindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
+    auto* state = sdlImeState(hwnd);
+    if (message == WM_TIMER && state != nullptr &&
+        state->reapplyTimer != 0 && wParam == state->reapplyTimer) {
+        KillTimer(hwnd, state->reapplyTimer);
+        state->reapplyTimer = 0;
+        reapplySdlImeRect(hwnd, state);
+        return 0;
+    }
+
+    const bool placementChanged = message == WM_IME_STARTCOMPOSITION ||
+        message == WM_IME_COMPOSITION ||
+        (message == WM_IME_NOTIFY &&
+         (wParam == IMN_OPENCANDIDATE || wParam == IMN_CHANGECANDIDATE));
+
+    if (placementChanged) {
+        reapplySdlImeRect(hwnd, state);
+    }
+
+    const LRESULT result = state != nullptr && state->previousProc != nullptr
+        ? CallWindowProcW(state->previousProc, hwnd, message, wParam, lParam)
+        : DefWindowProcW(hwnd, message, wParam, lParam);
+
+    if (placementChanged) {
+        state = sdlImeState(hwnd);
+        reapplySdlImeRect(hwnd, state);
+        if (state != nullptr) {
+            if (state->reapplyTimer != 0) {
+                KillTimer(hwnd, state->reapplyTimer);
+            }
+            state->reapplyTimer = SetTimer(hwnd, 0, USER_TIMER_MINIMUM, nullptr);
+        }
+    }
+    return result;
+}
+
+void installSdlImeFilter(SDL_Window* window) {
+    HWND hwnd = hwndForSdlWindow(window);
+    if (hwnd == nullptr || sdlImeState(hwnd) != nullptr) {
+        return;
+    }
+
+    auto* state = new (std::nothrow) SdlImeFilterState{};
+    if (state == nullptr) {
+        return;
+    }
+    state->previousProc = reinterpret_cast<WNDPROC>(GetWindowLongPtrW(hwnd, GWLP_WNDPROC));
+    if (state->previousProc == nullptr) {
+        delete state;
+        return;
+    }
+
+    gSdlImeFilters.emplace(hwnd, state);
+    SetLastError(ERROR_SUCCESS);
+    const LONG_PTR previous = SetWindowLongPtrW(
+        hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(sdlImeWindowProc));
+    if (previous == 0 && GetLastError() != ERROR_SUCCESS) {
+        gSdlImeFilters.erase(hwnd);
+        delete state;
+    }
+}
+
+void uninstallSdlImeFilter(SDL_Window* window) {
+    HWND hwnd = hwndForSdlWindow(window);
+    if (hwnd == nullptr) {
+        return;
+    }
+
+    auto* state = sdlImeState(hwnd);
+    if (state == nullptr) {
+        return;
+    }
+
+    if (state->reapplyTimer != 0) {
+        KillTimer(hwnd, state->reapplyTimer);
+    }
+    SetWindowLongPtrW(hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(state->previousProc));
+    gSdlImeFilters.erase(hwnd);
+    delete state;
+}
+
+#endif
 
 } // namespace
-#endif
 
 Handle createWindow(const WindowCreateRequest& request) {
     if (request.renderApi == RenderApi::OpenGL) {
@@ -66,18 +215,26 @@ Handle createWindow(const WindowCreateRequest& request) {
     }
     flags |= request.renderApi == RenderApi::Vulkan ? SDL_WINDOW_VULKAN : SDL_WINDOW_OPENGL;
 
-    return SDL_CreateWindow(
+    SDL_Window* window = SDL_CreateWindow(
         request.title != nullptr ? request.title : "",
         SDL_WINDOWPOS_CENTERED,
         SDL_WINDOWPOS_CENTERED,
         request.width,
         request.height,
         flags);
+#if defined(_WIN32)
+    installSdlImeFilter(window);
+#endif
+    return window;
 }
 
 void destroyWindow(Handle window) {
     if (window != nullptr) {
-        SDL_DestroyWindow(static_cast<SDL_Window*>(window));
+        auto* sdlWindow = static_cast<SDL_Window*>(window);
+#if defined(_WIN32)
+        uninstallSdlImeFilter(sdlWindow);
+#endif
+        SDL_DestroyWindow(sdlWindow);
     }
 }
 
@@ -178,49 +335,20 @@ void setWindowIcon(Handle window, int width, int height, unsigned char* pixels) 
 
 void setImeCursorRect(Handle window, float x, float y, float width, float height) {
 #if defined(_WIN32)
-    HWND hwnd = hwndForWindow(window);
+    SDL_Rect rect{
+        static_cast<int>(x + 0.5f),
+        static_cast<int>(y + 0.5f),
+        static_cast<int>(width + 0.5f),
+        static_cast<int>(height + 0.5f)
+    };
+    HWND hwnd = hwndForSdlWindow(static_cast<SDL_Window*>(window));
     if (hwnd != nullptr) {
-        HIMC context = ImmGetContext(hwnd);
-        if (context != nullptr) {
-            const double fontHeight = std::max(12.0f, height);
-            const LONG caretX = roundLong(x);
-            const LONG caretY = roundLong(y + height);
-            const LONG candidateY = roundLong(y + height * 0.45f);
-
-            COMPOSITIONFORM composition{};
-            composition.dwStyle = CFS_FORCE_POSITION;
-            composition.ptCurrentPos.x = caretX;
-            composition.ptCurrentPos.y = caretY;
-            composition.rcArea.left = roundLong(x);
-            composition.rcArea.top = roundLong(y);
-            composition.rcArea.right = roundLong(x + width);
-            composition.rcArea.bottom = roundLong(y + height);
-            ImmSetCompositionWindow(context, &composition);
-
-            CANDIDATEFORM candidate{};
-            candidate.dwIndex = 0;
-            candidate.dwStyle = CFS_CANDIDATEPOS;
-            candidate.ptCurrentPos.x = caretX;
-            candidate.ptCurrentPos.y = candidateY;
-            candidate.rcArea = composition.rcArea;
-            ImmSetCandidateWindow(context, &candidate);
-            LOGFONTW font{};
-            font.lfHeight = -roundLong(static_cast<float>(fontHeight));
-            font.lfCharSet = DEFAULT_CHARSET;
-            font.lfQuality = CLEARTYPE_QUALITY;
-            wcscpy_s(font.lfFaceName, LF_FACESIZE, L"Microsoft YaHei UI");
-            ImmSetCompositionFontW(context, &font);
-
-            ImmReleaseContext(hwnd, context);
+        auto* state = sdlImeState(hwnd);
+        if (state != nullptr) {
+            state->rect = rect;
+            state->hasRect = true;
         }
     }
-
-    SDL_Rect rect{
-        roundLong(x),
-        roundLong(y),
-        roundLong(width),
-        roundLong(height)
-    };
     SDL_SetTextInputRect(&rect);
 #else
     int windowWidth = 0;

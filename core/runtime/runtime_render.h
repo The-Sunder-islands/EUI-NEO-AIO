@@ -177,11 +177,15 @@ inline void Runtime::renderElement(
                                                  canvasInst.frame.value().height},
                                                 canvasInst.frame.value(),
                                                 canvasInst.transform.value()), dpiScale);
+    } else if (element.kind == ElementKind::Shadertoy) {
+        runtime::ShaderToyInstance& instance = shaderToyInstance(element.id);
+        Rect visual = toPixelRect(imageVisualRect(instance.frame.value(), instance.transform.value()), dpiScale);
         visual = applyRenderTransform(visual, renderTransform);
         if ((!dirtyRect || intersects(visual, *dirtyRect)) &&
             (!effectiveHasScissor || intersects(visual, effectiveScissor))) {
             applyOptionalScissor(renderBackend, effectiveHasScissor, effectiveScissor, windowHeight);
             renderCanvas(renderBackend, element, windowWidth, windowHeight, dpiScale, renderTransform);
+            renderShaderToy(element, windowWidth, windowHeight, dpiScale, renderTransform);
         }
     }
 
@@ -680,6 +684,7 @@ inline void Runtime::renderImage(
     instance.primitive->setBounds(frame.x, frame.y, frame.width, frame.height);
     instance.primitive->setTint(instance.tint.value());
     instance.primitive->setCornerRadius(toPixels(instance.radius.value(), dpiScale));
+    instance.primitive->setBlur(toPixels(instance.blur.value(), dpiScale));
     instance.primitive->setOpacity(instance.opacity.value() * renderTransform.opacity);
     instance.primitive->setTransformMatrix(combinedPrimitiveMatrix(renderTransform, frame, transform));
     instance.primitive->setFit(instance.fit);
@@ -716,6 +721,45 @@ inline void Runtime::renderCanvas(
     instance.primitive->setTransformMatrix(combinedPrimitiveMatrix(renderTransform, frame, transform));
     instance.primitive->prepare(instance.onDraw);
     instance.primitive->render(renderBackend, windowWidth, windowHeight);
+}
+
+inline void Runtime::renderShaderToy(
+    const Element& element,
+    int windowWidth,
+    int windowHeight,
+    float dpiScale,
+    const RenderTransform& renderTransform) {
+    runtime::ShaderToyInstance& instance = shaderToyInstance(element.id);
+    if (!instance.initialized) {
+        instance.initialized = instance.primitive->initialize();
+        if (!instance.initialized) {
+            return;
+        }
+    }
+
+    const Rect frame = toPixelRect(instance.frame.value(), dpiScale);
+    const Transform transform = scaleTransform(instance.transform.value(), dpiScale);
+    instance.primitive->setElementId(element.id);
+    instance.primitive->setBounds(frame.x, frame.y, frame.width, frame.height);
+    instance.primitive->setCornerRadius(toPixels(instance.radius.value(), dpiScale));
+    instance.primitive->setOpacity(instance.opacity.value() * renderTransform.opacity);
+    instance.primitive->setTransformMatrix(combinedPrimitiveMatrix(renderTransform, frame, transform));
+    instance.primitive->setResolutionScale(element.shaderToyResolutionScale);
+    instance.primitive->setTimeScale(element.shaderToyTimeScale);
+    instance.primitive->setPaused(element.shaderToyPaused);
+    ++core::render::currentRenderFrameStats().shadertoyDraws;
+    instance.primitive->render(windowWidth, windowHeight);
+
+    const core::render::ShaderToyError& error = instance.primitive->error();
+    if (error && element.onShaderToyError) {
+        const std::uint64_t errorHash = core::render::shaderToyErrorHash(error);
+        if (errorHash != instance.reportedErrorHash) {
+            instance.reportedErrorHash = errorHash;
+            element.onShaderToyError(error);
+        }
+    } else if (!error) {
+        instance.reportedErrorHash = 0;
+    }
 }
 
 } // namespace core::dsl

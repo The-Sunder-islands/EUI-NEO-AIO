@@ -1,3 +1,4 @@
+#include "components/input.h"
 #include "components/input_model.h"
 
 #include <array>
@@ -50,6 +51,51 @@ int main() {
     }
     if (secondLineCursor < 11) {
         std::cerr << "Second line click did not resolve to second line: " << secondLineCursor << "\n";
+        return 1;
+    }
+
+    Model::InputState scrolledState;
+    scrolledState.text = "one\ntwo\nthree\nfour\nfive\nsix";
+    scrolledState.textRevision = 1;
+    scrolledState.cursor = static_cast<int>(scrolledState.text.size());
+    scrolledState.verticalScroll = 0.0f;
+    scrolledState.followCaret = false;
+    Model::InputLayout::build(
+        scrolledState, viewportWidth, fontSize * 2.0f, width, inset, inset,
+        fontSize, "monospace", fontSize, true);
+    if (scrolledState.verticalScroll != 0.0f) {
+        std::cerr << "Manual multiline scroll was overridden by caret following\n";
+        return 1;
+    }
+
+    core::dsl::Ui ui;
+    ui.begin("input.viewport");
+    components::input(ui, "field")
+        .size(120.0f, 42.0f)
+        .value("A very long value that must scroll inside the field")
+        .build();
+    ui.end();
+    ui.layout(120.0f, 42.0f);
+    const core::dsl::Element* textViewport = ui.find("field.textViewport");
+    if (textViewport == nullptr || !textViewport->clip || textViewport->frame.x <= 0.0f || textViewport->frame.width >= 120.0f) {
+        std::cerr << "Input text viewport did not preserve the horizontal inset\n";
+        return 1;
+    }
+
+    ui.begin("input.multiline");
+    components::input(ui, "multiline")
+        .size(180.0f, 100.0f)
+        .fontSize(20.0f)
+        .multiline()
+        .value("first\nsecond")
+        .build();
+    ui.end();
+    ui.layout(180.0f, 100.0f);
+    const core::dsl::Element* firstTextLine = ui.find("multiline.text.0");
+    const core::dsl::Element* secondTextLine = ui.find("multiline.text.1");
+    if (firstTextLine == nullptr || secondTextLine == nullptr ||
+        std::fabs(secondTextLine->frame.y - firstTextLine->frame.y - 24.0f) > 0.01f) {
+        std::cerr << "Multiline input did not reserve a full text line height\n";
         return 1;
     }
 

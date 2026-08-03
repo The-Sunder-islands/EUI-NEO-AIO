@@ -219,6 +219,7 @@ void OpenGLRenderBackend::drawTexture(TextureHandle handle,
                                       const core::Color& tint,
                                       const core::Rect& rect,
                                       float radius,
+                                      float blur,
                                       int windowWidth,
                                       int windowHeight) {
     const GLuint texture = textureIdFromHandle(handle);
@@ -238,6 +239,41 @@ void OpenGLRenderBackend::drawTexture(TextureHandle handle,
     glUniform4f(imageTintLocation_, tint.r, tint.g, tint.b, tint.a);
     glUniform4f(imageRectLocation_, rect.x, rect.y, rect.width, rect.height);
     glUniform1f(imageRadiusLocation_, radius);
+    glUniform1f(imageBlurLocation_, blur);
+    glUniform1i(imageTextureLocation_, 0);
+
+    bindVertexArray(imageVao_);
+    bindArrayBuffer(imageVbo_);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, static_cast<GLsizeiptr>(vertexFloatCount * sizeof(float)), vertices);
+    activeTextureUnit(0);
+    bindTexture2D(texture);
+    glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertexFloatCount / 7));
+}
+
+void OpenGLRenderBackend::drawLayerTexture(TextureHandle handle,
+                                           const float* vertices,
+                                           std::size_t vertexFloatCount,
+                                           const core::Rect& rect,
+                                           int windowWidth,
+                                           int windowHeight) {
+    const GLuint texture = textureIdFromHandle(handle);
+    if (texture == 0 || vertices == nullptr || vertexFloatCount < 42 ||
+        windowWidth <= 0 || windowHeight <= 0) {
+        return;
+    }
+    if (!ensureImageResources()) {
+        return;
+    }
+
+    setPremultipliedAlphaBlend();
+
+    useProgram(imageShaderProgram_);
+    glUniform2f(imageWindowSizeLocation_, static_cast<float>(std::max(1, windowWidth)),
+                static_cast<float>(std::max(1, windowHeight)));
+    glUniform4f(imageTintLocation_, 1.0f, 1.0f, 1.0f, 1.0f);
+    glUniform4f(imageRectLocation_, rect.x, rect.y, rect.width, rect.height);
+    glUniform1f(imageRadiusLocation_, 0.0f);
+    glUniform1f(imageBlurLocation_, 0.0f);
     glUniform1i(imageTextureLocation_, 0);
 
     bindVertexArray(imageVao_);
@@ -311,6 +347,7 @@ bool OpenGLRenderBackend::ensureImageResources() {
         "uniform vec4 uTint;\n"
         "uniform vec4 uRect;\n"
         "uniform float uRadius;\n"
+        "uniform float uBlur;\n"
         "float roundedBoxDistance(vec2 point, vec2 halfSize, float radius) {\n"
         "    vec2 cornerVector = abs(point) - halfSize + vec2(radius);\n"
         "    return length(max(cornerVector, 0.0)) + min(max(cornerVector.x, cornerVector.y), 0.0) - radius;\n"
@@ -322,6 +359,20 @@ bool OpenGLRenderBackend::ensureImageResources() {
         "    float shapeAlpha = 1.0 - smoothstep(-edgeWidth, edgeWidth, distanceToEdge);\n"
         "    if (shapeAlpha <= 0.0) discard;\n"
         "    vec4 sampled = texture(uTexture, vUV);\n"
+        "    if (uBlur > 0.01) {\n"
+        "        vec2 pixelStep = max(fwidth(vUV), 1.0 / vec2(textureSize(uTexture, 0)));\n"
+        "        vec2 blurStep = pixelStep * uBlur * 0.5;\n"
+        "        sampled *= 4.0;\n"
+        "        sampled += texture(uTexture, clamp(vUV + vec2( blurStep.x, 0.0), 0.0, 1.0)) * 2.0;\n"
+        "        sampled += texture(uTexture, clamp(vUV + vec2(-blurStep.x, 0.0), 0.0, 1.0)) * 2.0;\n"
+        "        sampled += texture(uTexture, clamp(vUV + vec2(0.0,  blurStep.y), 0.0, 1.0)) * 2.0;\n"
+        "        sampled += texture(uTexture, clamp(vUV + vec2(0.0, -blurStep.y), 0.0, 1.0)) * 2.0;\n"
+        "        sampled += texture(uTexture, clamp(vUV + blurStep, 0.0, 1.0));\n"
+        "        sampled += texture(uTexture, clamp(vUV - blurStep, 0.0, 1.0));\n"
+        "        sampled += texture(uTexture, clamp(vUV + vec2( blurStep.x, -blurStep.y), 0.0, 1.0));\n"
+        "        sampled += texture(uTexture, clamp(vUV + vec2(-blurStep.x,  blurStep.y), 0.0, 1.0));\n"
+        "        sampled /= 16.0;\n"
+        "    }\n"
         "    FragColor = vec4(sampled.rgb * uTint.rgb, sampled.a * uTint.a * shapeAlpha);\n"
         "}\n";
 
@@ -356,6 +407,7 @@ bool OpenGLRenderBackend::ensureImageResources() {
     imageTintLocation_ = glGetUniformLocation(imageShaderProgram_, "uTint");
     imageRectLocation_ = glGetUniformLocation(imageShaderProgram_, "uRect");
     imageRadiusLocation_ = glGetUniformLocation(imageShaderProgram_, "uRadius");
+    imageBlurLocation_ = glGetUniformLocation(imageShaderProgram_, "uBlur");
 
     glGenVertexArrays(1, &imageVao_);
     glGenBuffers(1, &imageVbo_);
@@ -407,6 +459,7 @@ void OpenGLRenderBackend::releaseImageResources() {
     imageTintLocation_ = -1;
     imageRectLocation_ = -1;
     imageRadiusLocation_ = -1;
+    imageBlurLocation_ = -1;
     resetStateCache();
 }
 

@@ -66,6 +66,7 @@ OpenGLRenderBackend::~OpenGLRenderBackend() {
     releasePrimitiveResources();
     releasePolygonResources();
     releaseTextResources();
+    releaseShaderToys();
     releaseImageResources();
 #if defined(EUI_WINDOW_BACKEND_SDL2)
     if (context_ != nullptr) {
@@ -117,7 +118,17 @@ bool OpenGLRenderBackend::valid() const {
 }
 
 void OpenGLRenderBackend::resetStateCache() {
-    stateCacheValid_ = false;
+    programStateValid_ = false;
+    vaoStateValid_ = false;
+    arrayBufferStateValid_ = false;
+    textureUnitStateValid_ = false;
+    for (bool& valid : texture2DStateValid_) {
+        valid = false;
+    }
+    blendEnabledStateValid_ = false;
+    blendFunctionStateValid_ = false;
+    scissorEnabledStateValid_ = false;
+    scissorRectStateValid_ = false;
     blendEnabled_ = false;
     alphaBlendSet_ = false;
     scissorEnabledState_ = false;
@@ -135,26 +146,26 @@ void OpenGLRenderBackend::resetStateCache() {
 }
 
 void OpenGLRenderBackend::useProgram(unsigned int program) {
-    if (!stateCacheValid_ || currentProgram_ != program) {
+    if (!programStateValid_ || currentProgram_ != program) {
         glUseProgram(program);
         currentProgram_ = program;
-        stateCacheValid_ = true;
+        programStateValid_ = true;
     }
 }
 
 void OpenGLRenderBackend::bindVertexArray(unsigned int vao) {
-    if (!stateCacheValid_ || currentVao_ != vao) {
+    if (!vaoStateValid_ || currentVao_ != vao) {
         glBindVertexArray(vao);
         currentVao_ = vao;
-        stateCacheValid_ = true;
+        vaoStateValid_ = true;
     }
 }
 
 void OpenGLRenderBackend::bindArrayBuffer(unsigned int buffer) {
-    if (!stateCacheValid_ || currentArrayBuffer_ != buffer) {
+    if (!arrayBufferStateValid_ || currentArrayBuffer_ != buffer) {
         glBindBuffer(GL_ARRAY_BUFFER, buffer);
         currentArrayBuffer_ = buffer;
-        stateCacheValid_ = true;
+        arrayBufferStateValid_ = true;
     }
 }
 
@@ -162,57 +173,64 @@ void OpenGLRenderBackend::activeTextureUnit(unsigned int unit) {
     if (unit >= 8) {
         return;
     }
-    if (!stateCacheValid_ || currentTextureUnit_ != unit) {
+    if (!textureUnitStateValid_ || currentTextureUnit_ != unit) {
         glActiveTexture(GL_TEXTURE0 + unit);
         currentTextureUnit_ = unit;
-        stateCacheValid_ = true;
+        textureUnitStateValid_ = true;
     }
 }
 
 void OpenGLRenderBackend::bindTexture2D(unsigned int texture) {
+    if (!textureUnitStateValid_) {
+        glActiveTexture(GL_TEXTURE0);
+        currentTextureUnit_ = 0;
+        textureUnitStateValid_ = true;
+    }
     if (currentTextureUnit_ >= 8) {
         glBindTexture(GL_TEXTURE_2D, texture);
         resetStateCache();
         return;
     }
-    if (!stateCacheValid_ || currentTexture2D_[currentTextureUnit_] != texture) {
+    if (!texture2DStateValid_[currentTextureUnit_] ||
+        currentTexture2D_[currentTextureUnit_] != texture) {
         glBindTexture(GL_TEXTURE_2D, texture);
         currentTexture2D_[currentTextureUnit_] = texture;
-        stateCacheValid_ = true;
+        texture2DStateValid_[currentTextureUnit_] = true;
     }
 }
 
 void OpenGLRenderBackend::setBlendEnabled(bool enabled) {
-    if (!stateCacheValid_ || blendEnabled_ != enabled) {
+    if (!blendEnabledStateValid_ || blendEnabled_ != enabled) {
         if (enabled) {
             glEnable(GL_BLEND);
         } else {
             glDisable(GL_BLEND);
         }
         blendEnabled_ = enabled;
-        stateCacheValid_ = true;
+        blendEnabledStateValid_ = true;
     }
 }
 
 void OpenGLRenderBackend::setStandardAlphaBlend() {
     setBlendEnabled(true);
-    if (!stateCacheValid_ || !alphaBlendSet_) {
+    if (!blendFunctionStateValid_ || !alphaBlendSet_) {
         glBlendFuncSeparate(GL_SRC_ALPHA,
                             GL_ONE_MINUS_SRC_ALPHA,
                             GL_ONE,
                             GL_ONE_MINUS_SRC_ALPHA);
         alphaBlendSet_ = true;
-        stateCacheValid_ = true;
+        blendFunctionStateValid_ = true;
     }
 }
 
 void OpenGLRenderBackend::setPremultipliedAlphaBlend() {
     setBlendEnabled(true);
-    glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-    alphaBlendSet_ = false;
-    stateCacheValid_ = true;
+    if (!blendFunctionStateValid_ || alphaBlendSet_) {
+        glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+        alphaBlendSet_ = false;
+        blendFunctionStateValid_ = true;
+    }
 }
-
 void OpenGLRenderBackend::makeCurrent() {
     if (window_ == nullptr) {
         return;
@@ -455,10 +473,10 @@ void OpenGLRenderBackend::clear(const core::Color& color) {
 
 void OpenGLRenderBackend::setScissor(bool enabled, const core::Rect& rect, int framebufferHeight) {
     if (!enabled) {
-        if (!stateCacheValid_ || scissorEnabledState_) {
+        if (!scissorEnabledStateValid_ || scissorEnabledState_) {
             glDisable(GL_SCISSOR_TEST);
             scissorEnabledState_ = false;
-            stateCacheValid_ = true;
+            scissorEnabledStateValid_ = true;
         }
         return;
     }
@@ -474,12 +492,12 @@ void OpenGLRenderBackend::setScissor(bool enabled, const core::Rect& rect, int f
     const GLint safeY = std::max<GLint>(0, y);
     const GLsizei safeWidth = std::max<GLsizei>(1, width);
     const GLsizei safeHeight = std::max<GLsizei>(1, height);
-    if (!stateCacheValid_ || !scissorEnabledState_) {
+    if (!scissorEnabledStateValid_ || !scissorEnabledState_) {
         glEnable(GL_SCISSOR_TEST);
         scissorEnabledState_ = true;
-        stateCacheValid_ = true;
+        scissorEnabledStateValid_ = true;
     }
-    if (!stateCacheValid_ ||
+    if (!scissorRectStateValid_ ||
         scissorX_ != x ||
         scissorY_ != safeY ||
         scissorWidth_ != safeWidth ||
@@ -489,8 +507,7 @@ void OpenGLRenderBackend::setScissor(bool enabled, const core::Rect& rect, int f
         scissorY_ = safeY;
         scissorWidth_ = safeWidth;
         scissorHeight_ = safeHeight;
-        stateCacheValid_ = true;
+        scissorRectStateValid_ = true;
     }
 }
-
 } // namespace core::render::opengl

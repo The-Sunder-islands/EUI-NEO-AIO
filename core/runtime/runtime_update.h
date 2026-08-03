@@ -676,6 +676,9 @@ inline void Runtime::setScrollOffset(const std::string& stateId, float offset) {
         if (owner->onScrollOffsetChanged && !owner->disabled) {
             owner->onScrollOffsetChanged(instance.offset);
         }
+        if (owner->composeOnScrollOffsetChange && !owner->disabled) {
+            composeRequested_ = true;
+        }
     }
 }
 

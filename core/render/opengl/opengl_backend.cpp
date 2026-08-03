@@ -43,9 +43,9 @@ bool loadOpenGLFunctions() {
 #endif
 
 bool platformRequiresConservativeBackbufferSync() {
-#if defined(__linux__)
-    // Linux OpenGL drivers/window systems may not preserve post-swap backbuffer contents.
-    // Use full cache blits there instead of assuming previous backbuffer pixels are valid.
+#if defined(__linux__) || defined(_WIN32)
+    // The backbuffer contents and swap order are not guaranteed after presenting.
+    // Use full cache blits instead of assuming a preserved two-buffer swap chain.
     return true;
 #else
     return false;
@@ -197,7 +197,10 @@ void OpenGLRenderBackend::setBlendEnabled(bool enabled) {
 void OpenGLRenderBackend::setStandardAlphaBlend() {
     setBlendEnabled(true);
     if (!stateCacheValid_ || !alphaBlendSet_) {
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glBlendFuncSeparate(GL_SRC_ALPHA,
+                            GL_ONE_MINUS_SRC_ALPHA,
+                            GL_ONE,
+                            GL_ONE_MINUS_SRC_ALPHA);
         alphaBlendSet_ = true;
         stateCacheValid_ = true;
     }

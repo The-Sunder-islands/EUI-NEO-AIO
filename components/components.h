@@ -12,6 +12,7 @@
 #include "components/tabs.h"
 #include "components/scroll.h"
 #include "components/scrollview.h"
+#include "components/virtuallist.h"
 
 #include "components/dropdown.h"
 #include "components/datepicker.h"
@@ -41,4 +42,5 @@
 
 #include "components/workshop/heart_switch.h"
 #include "components/workshop/neumorphic_button.h"
+#include "components/workshop/card_slider.h"
 #include "components/workshop/tilt_card.h"

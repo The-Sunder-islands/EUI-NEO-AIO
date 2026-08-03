@@ -63,8 +63,8 @@ public:
                           const float* vertices,
                           std::size_t vertexFloatCount,
                           const core::Rect& rect,
-                          int windowWidth,
-                          int windowHeight) override;
+                           int windowWidth,
+                           int windowHeight) override;
     void drawCanvasShape(const CanvasDrawCommand& command,
                          int windowWidth,
                          int windowHeight) override;

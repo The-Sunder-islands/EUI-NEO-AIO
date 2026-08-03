@@ -274,7 +274,7 @@ public:
                                 int windowHeight) {
         (void)command; (void)windowWidth; (void)windowHeight;
     }
-};
+  };
 
 std::unique_ptr<RenderBackend> createRenderBackend(core::window::Handle window, RenderBackend* shareBackend = nullptr);
 core::window::RenderApi windowRenderApi();

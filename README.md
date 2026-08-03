@@ -67,9 +67,9 @@ Requirements:
 - Vulkan SDK is optional. Use a `build-vk` directory only when you want the Vulkan renderer.
 - Platform OpenGL/windowing development files. Linux builds also need X11 and libcurl development packages.
 
-Build-time sources for GLFW, glad, tray, FreeType, HarfBuzz, libpng, and zlib are vendored under `3rd/`. The default dependency mode is `auto`: CMake uses the local `3rd/` sources when they are present, and fetches only missing dependencies from pinned upstream URLs. Use `-DEUI_DEPS_MODE=bundled` for strict offline builds, or `-DEUI_DEPS_MODE=fetch` to force online dependency fetches. HarfBuzz shaping is enabled by default and can be disabled with `-DEUI_ENABLE_HARFBUZZ=OFF`.
+Build-time sources for GLFW, glad, tray, FreeType, HarfBuzz, libpng, and zlib are vendored under `3rd/`. The default dependency mode is `auto`: CMake uses existing parent targets for `glfw` / `glad` first, then package targets, then the local `3rd/` sources or pinned fetch fallback. Use `-DEUI_DEPS_MODE=bundled` for strict offline builds, or `-DEUI_DEPS_MODE=fetch` to force online dependency fetches. HarfBuzz shaping is enabled by default and can be disabled with `-DEUI_ENABLE_HARFBUZZ=OFF`.
 
-Bundled and fetched dependencies are built for static linking by default, including GLFW. Release packages therefore do not need to ship a GLFW DLL / dylib / so. SDL2 may still be dynamic when you choose a system SDL2 package.
+Bundled and fetched dependencies are built for static linking by default, including GLFW. Release packages therefore do not need to ship a GLFW DLL / dylib / so. SDL2 may still be dynamic when you choose a system SDL2 package. The `eui_neo` target itself is static by default; configure with `-DEUI_BUILD_SHARED=ON` when you want to build and install it as a shared library.
 
 GLFW is the default window backend. SDL2 is optional and is not vendored. If GLFW is not available or you want to test SDL2, add `sdl2` to the build directory name:
 
@@ -113,9 +113,15 @@ sudo apt-get install -y ninja-build libx11-dev libxrandr-dev libxinerama-dev lib
 sudo apt-get install -y libsdl2-dev
 ```
 
-Top-level builds create one executable for each `examples/*.cpp` page source, such as `gallery` and `eui_demo`. After build, `assets/` is copied next to the executable automatically.
+Top-level builds create one executable for each `examples/*.cpp` page source, such as `gallery`, `card_slider`, and `eui_demo`. After build, `assets/` is copied next to the executable automatically.
 
-Tagged releases (`v*`) build Windows, Linux, and macOS packages through GitHub Actions and upload only runtime packages as release assets.
+User apps can live under `apps/` and are built the same way by default in a top-level checkout. Use either a flat `apps/my_app.cpp` file or a directory app such as `apps/my_app/app.cpp`. Directory apps may include their own `apps/my_app/assets/`; those files are copied into the executable `assets/` directory after the framework assets. Disable this scan with `-DEUI_BUILD_USER_APPS=OFF`.
+
+## Optional Modules
+
+Optional feature modules live under `modules/` and are documented in the [Modules Guide](docs/modules.md).
+
+Tagged releases (`v*`) build Windows, Linux, and macOS packages through GitHub Actions and upload runtime and SDK packages as release assets. Runtime packages automatically collect every executable generated from `examples/*.cpp`.
 
 ## Use In Your Project
 
@@ -188,6 +194,8 @@ components/   Reusable UI components built on top of the DSL
 core/         DSL, Runtime, primitives, text, image, network, and platform code
 docs/         Implementation notes and API documentation
 examples/     Standalone gallery and example application sources
+modules/      Optional feature modules such as keyboard, media, and serial
+apps/         User application sources; flat .cpp files or app folders
 include/      Public include path: eui_neo.h and eui/* facade headers
 tests/        Probe sources, fixture apps, and local benchmark notes
 3rd/          Vendored third-party build sources and single-file dependencies
@@ -197,11 +205,14 @@ tests/        Probe sources, fixture apps, and local benchmark notes
 
 - [DSL Design And Current Implementation](docs/DSL.md)
 - [Components](docs/组件.md)
+- [Modules](docs/modules.md)
+- [State Model](docs/状态.md)
 - [Layout](docs/布局.md)
 - [Events](docs/事件.md)
 - [Animation](docs/动画.md)
 - [Async](docs/异步.md)
 - [Render Backend Architecture And Pipeline](docs/渲染后端架构.md)
+- [Retained Layer Cache](docs/retained_layer_cache.md)
 - [Images](docs/图片.md)
 - [Network](docs/网络.md)
 - [Platform Capabilities](docs/平台能力.md)

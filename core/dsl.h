@@ -144,6 +144,7 @@ struct Element {
 
     bool interactive = false;
     bool focusable = false;
+    bool preserveFocusOnPress = false;
     bool disabled = false;
     HitTestMode hitTestMode = HitTestMode::Layout;
     bool hasImeRect = false;
@@ -174,6 +175,7 @@ struct Element {
     std::string scrollContentSourceId;
     std::string scrollDragSourceId;
     std::string scrollThumbSourceId;
+    bool composeOnScrollOffsetChange = false;
     std::string sliderStateId;
     std::string sliderInputSourceId;
     std::string sliderFillSourceId;
@@ -504,6 +506,11 @@ public:
         return self();
     }
 
+    Derived& preserveFocusOnPress(bool value = true) {
+        element_->preserveFocusOnPress = value;
+        return self();
+    }
+
     Derived& imeRect(float xValue, float yValue, float widthValue, float heightValue) {
         element_->hasImeRect = true;
         element_->imeRect = {
@@ -692,6 +699,11 @@ public:
     Derived& onScrollOffsetChanged(std::function<void(float)> callback) {
         element_->interactive = true;
         element_->onScrollOffsetChanged = std::move(callback);
+        return self();
+    }
+
+    Derived& composeOnScrollOffsetChange(bool value = true) {
+        element_->composeOnScrollOffsetChange = value;
         return self();
     }
 
@@ -1601,11 +1613,11 @@ private:
                !element.sliderInputSourceId.empty() ||
                !element.sliderFillSourceId.empty() ||
                !element.sliderKnobSourceId.empty() ||
-               !element.dirtyKey.empty() ||
-               element.onCanvasDraw ||
-               (element.kind == ElementKind::Image && !element.imageSource.empty()) ||
-               element.kind == ElementKind::Svg ||
-               element.kind == ElementKind::Canvas;
+                !element.dirtyKey.empty() ||
+                element.onCanvasDraw ||
+                (element.kind == ElementKind::Image && !element.imageSource.empty()) ||
+                element.kind == ElementKind::Svg ||
+                element.kind == ElementKind::Canvas;
     }
 
     static bool elementHasDependentVisuals(const Element& element) {
@@ -1619,7 +1631,8 @@ private:
     }
 
     static bool elementBlocksRetainedLayer(const Element& element) {
-        return element.interactive ||
+        return element.clip ||
+               element.interactive ||
                element.focusable ||
                element.hasImeRect ||
                element.onClick ||
@@ -1647,11 +1660,11 @@ private:
                !element.sliderInputSourceId.empty() ||
                !element.sliderFillSourceId.empty() ||
                !element.sliderKnobSourceId.empty() ||
-               !element.dirtyKey.empty() ||
-               element.onCanvasDraw ||
-               (element.kind == ElementKind::Image && !element.imageSource.empty()) ||
-               element.kind == ElementKind::Svg ||
-               element.kind == ElementKind::Canvas;
+                !element.dirtyKey.empty() ||
+                element.onCanvasDraw ||
+                (element.kind == ElementKind::Image && !element.imageSource.empty()) ||
+                element.kind == ElementKind::Svg ||
+                element.kind == ElementKind::Canvas;
     }
 
     std::string pageId_;

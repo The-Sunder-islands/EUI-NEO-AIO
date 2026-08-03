@@ -1,4 +1,0 @@
-/home/starlight/android-sdk/cmake/3.22.1/bin/ninja \
-  -C \
-  /home/starlight/EUI-NEO-AIO/android/app/.cxx/Debug/1z4a2e3w/armeabi-v7a \
-  eui-neo
